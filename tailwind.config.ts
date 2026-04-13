@@ -1,7 +1,9 @@
 import type { Config } from "tailwindcss";
+import tailwindcssAnimate from "tailwindcss-animate";
+import aspectRatio from "@tailwindcss/aspect-ratio";
 
 const config: Config = {
-  darkMode: ["class"],
+  darkMode: "class",
   content: [
     "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
     "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
@@ -64,10 +66,7 @@ const config: Config = {
       },
     },
   },
- plugins: [
-  require("tailwindcss-animate"),
-  require("@tailwindcss/aspect-ratio"), // Thêm dòng này
-],
+  plugins: [tailwindcssAnimate, aspectRatio],
 };
 
 export default config;
