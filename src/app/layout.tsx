@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css"; // Đảm bảo dòng này có mặt để kích hoạt Tailwind
+import { AppProvider } from "@/src/components/providers/app-provider";
 
 export const metadata: Metadata = {
   title: "Zalo Clone - Thế Anh",
@@ -15,7 +16,7 @@ export default function RootLayout({
     <html lang="vi">
       {/* Thêm class "dark" vào body nếu bạn muốn test giao diện tối luôn */}
       <body className="antialiased">
-        {children}
+        <AppProvider>{children}</AppProvider>
       </body>
     </html>
   );

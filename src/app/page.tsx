@@ -1,788 +1,839 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import type { IUser, PrivacyStatus } from "@/src/types/user";
+import Image from "next/image";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
-  BookImage,
-  Briefcase,
-  CheckCheck,
+  BookMarked,
+  ChevronDown,
   CircleUserRound,
-  Cloud,
-  Lock,
+  Dot,
+  Eye,
+  EyeOff,
+  Image as ImageIcon,
+  KeyRound,
   LogOut,
-  MessageCircle,
+  MessageSquare,
+  MoreHorizontal,
+  Phone,
   Search,
+  Send,
   Settings,
   ShieldCheck,
-  SlidersHorizontal,
-  SquareDashedBottom,
-  UserPlus,
+  Sparkles,
+  UserRoundPen,
   Users,
+  Video,
   X,
 } from "lucide-react";
+import { useAuthGuard } from "@/src/hooks/use-auth-guard";
+import {
+  useProfile,
+  useUpdatePrivacy,
+  useUpdateProfile,
+  useUpdateStatus,
+  useUploadAvatar,
+  useUploadCover,
+} from "@/src/hooks/use-user";
+import { PageLoader } from "@/src/components/ui/page-state";
+import { useToast } from "@/src/components/providers/toast-provider";
+import { getErrorMessage } from "@/src/utils/error";
+import { IUser, PrivacyStatus } from "@/src/types/user";
+import { useChangePassword, useLogoutAllDevices, useSessions } from "@/src/hooks/use-auth-actions";
+import { strongPasswordRegex } from "@/src/utils/validators/auth";
+import axios from "axios";
 
-type ChatFilter = "all" | "unread" | "read";
-type SettingsTab = "general" | "security" | "privacy";
+type ReadFilter = "ALL" | "UNREAD" | "READ";
+type SettingsTab = "GENERAL" | "SECURITY" | "PRIVACY" | "SESSIONS";
 
-type ConversationItem = {
+type Conversation = {
   id: string;
   name: string;
+  subtitle: string;
   lastMessage: string;
   time: string;
-  unread: number;
-  online?: boolean;
+  unreadCount: number;
+  online: boolean;
+  avatarColor: string;
+  messages: Array<{
+    id: string;
+    sender: "me" | "them" | "system";
+    text: string;
+    time: string;
+  }>;
 };
 
-const FAKE_SESSION_KEY = "zalo_fake_session";
-const UPLOAD_ENDPOINT = process.env.NEXT_PUBLIC_UPLOAD_ENDPOINT;
-const PROFILE_UPDATE_ENDPOINT = process.env.NEXT_PUBLIC_PROFILE_UPDATE_ENDPOINT;
-
-const initialConversations: ConversationItem[] = [
+const conversationsSeed: Conversation[] = [
   {
-    id: "team-aurora",
-    name: "Aurora Design Team",
-    lastMessage: "Minh: Chốt màu gradient xanh ngọc cho release hôm nay nhé.",
-    time: "1 phút",
-    unread: 4,
+    id: "c1",
+    name: "Nhóm Sản phẩm A1",
+    subtitle: "6 thành viên",
+    lastMessage: "Mình vừa hoàn tất bản giao diện mới cho desktop.",
+    time: "10:24",
+    unreadCount: 3,
     online: true,
+    avatarColor: "from-emerald-400 to-teal-600",
+    messages: [
+      { id: "m1", sender: "system", text: "Hôm nay ưu tiên chốt màn hình cài đặt và hồ sơ.", time: "09:10" },
+      { id: "m2", sender: "them", text: "Mình vừa hoàn tất bản giao diện mới cho desktop.", time: "10:24" },
+    ],
   },
   {
-    id: "ops-lab",
-    name: "Ops Lab",
-    lastMessage: "Hưng: Deploy xong môi trường staging, mời mọi người test.",
-    time: "12 phút",
-    unread: 0,
-  },
-  {
-    id: "client-vesta",
-    name: "Client Vesta",
-    lastMessage: "Trang: Mockup dashboard đã gửi vào email, check giúp em.",
-    time: "26 phút",
-    unread: 1,
+    id: "c2",
+    name: "An Nghiệp vụ",
+    subtitle: "Đang hoạt động",
+    lastMessage: "Lọc Đã đọc/Chưa đọc nhìn ổn rồi nhé.",
+    time: "09:42",
+    unreadCount: 0,
     online: true,
+    avatarColor: "from-orange-400 to-amber-600",
+    messages: [
+      { id: "m1", sender: "them", text: "Lọc Đã đọc/Chưa đọc nhìn ổn rồi nhé.", time: "09:42" },
+      { id: "m2", sender: "me", text: "Ok, mình giữ đúng layout để team dễ dùng.", time: "09:44" },
+    ],
   },
   {
-    id: "family",
-    name: "Nhà mình",
-    lastMessage: "Mẹ: Tối về ăn cơm nha con.",
-    time: "1 giờ",
-    unread: 0,
+    id: "c3",
+    name: "Thu Kiểm thử",
+    subtitle: "Đã xem 3 phút trước",
+    lastMessage: "Bản build mới mượt hơn rõ rệt.",
+    time: "08:56",
+    unreadCount: 1,
+    online: false,
+    avatarColor: "from-cyan-400 to-sky-600",
+    messages: [
+      { id: "m1", sender: "me", text: "Bạn test lại luồng đăng nhập chưa?", time: "08:51" },
+      { id: "m2", sender: "them", text: "Bản build mới mượt hơn rõ rệt.", time: "08:56" },
+    ],
   },
   {
-    id: "research",
-    name: "Research Squad",
-    lastMessage: "Khang: Đã note lại benchmark realtime chat ở Notion.",
-    time: "3 giờ",
-    unread: 6,
-  },
-  {
-    id: "class-ai",
-    name: "AI Class 2026",
-    lastMessage: "Giảng viên: Deadline bài tập là 23:59 Chủ nhật.",
-    time: "6 giờ",
-    unread: 2,
-  },
-  {
-    id: "music-club",
-    name: "Acoustic Club",
-    lastMessage: "An: T7 tập bài mới ở studio nhé mọi người.",
+    id: "c4",
+    name: "Cộng đồng Thiết kế",
+    subtitle: "42 thành viên",
+    lastMessage: "Tone màu này đúng signature của nhóm luôn.",
     time: "Hôm qua",
-    unread: 0,
+    unreadCount: 0,
+    online: false,
+    avatarColor: "from-fuchsia-400 to-pink-600",
+    messages: [{ id: "m1", sender: "them", text: "Tone màu này đúng signature của nhóm luôn.", time: "Hôm qua" }],
+  },
+  {
+    id: "c5",
+    name: "Minh Vận hành",
+    subtitle: "Đang bận",
+    lastMessage: "Đã cấu hình monitor cho server chat.",
+    time: "Thứ 2",
+    unreadCount: 2,
+    online: true,
+    avatarColor: "from-indigo-400 to-blue-700",
+    messages: [
+      { id: "m1", sender: "them", text: "Đã cấu hình monitor cho server chat.", time: "Thứ 2" },
+      { id: "m2", sender: "me", text: "Tuyệt vời, mình sẽ kiểm tra logs ngay.", time: "Thứ 2" },
+    ],
   },
 ];
 
-const settingsItems = [
-  { key: "general", label: "Cài đặt chung", icon: SlidersHorizontal },
-  { key: "security", label: "Tài khoản và bảo mật", icon: ShieldCheck },
-  { key: "privacy", label: "Quyền riêng tư", icon: Lock },
-] as const;
-
-const defaultUser: IUser = {
-  _id: "demo-user-001",
-  phone: "0987654321",
-  email: "demo@quickchat.local",
-  fullName: "Thế Anh",
-  avatar: "",
-  coverImage: "/images/anhnen.jpg",
-  dob: new Date("2003-09-16"),
-  gender: "male",
-  bio: "Xây QuickChat chân thực cho team.",
-  status: {
-    isOnline: true,
-    lastSeen: new Date(),
-  },
-  privacy: {
-    showPhone: "FRIEND",
-    showOnline: true,
-    allowStrangerMessage: true,
-    findByPhone: true,
-  },
-  settings: {
-    darkMode: false,
-    language: "vi",
-    twoFactorAuth: false,
-  },
-  fcmTokens: [],
-  isVerified: true,
-  isBlocked: false,
-  createdAt: new Date(),
-  updatedAt: new Date(),
-};
-
-const toInputDate = (value?: Date) => {
-  if (!value) {
-    return "";
-  }
-
-  return new Date(value.getTime() - value.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-};
-
-const statusLabel = (value: PrivacyStatus) => {
-  if (value === "ALL") {
-    return "Tất cả mọi người";
-  }
-
-  if (value === "FRIEND") {
-    return "Bạn bè";
-  }
-
-  return "Riêng tư";
-};
-
-async function uploadFileToS3(file: File): Promise<string> {
-  if (!UPLOAD_ENDPOINT) {
-    return URL.createObjectURL(file);
-  }
-
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const response = await fetch(UPLOAD_ENDPOINT, {
-    method: "POST",
-    body: formData,
-  });
-
-  if (!response.ok) {
-    throw new Error("Upload failed");
-  }
-
-  const data = (await response.json()) as { url?: string; data?: { url?: string } };
-
-  const url = data.url ?? data.data?.url;
-
-  if (!url) {
-    throw new Error("Upload response missing url");
-  }
-
-  return url;
-}
-
 export default function HomePage() {
-  const router = useRouter();
-  const [isReady, setIsReady] = useState(false);
-  const [keyword, setKeyword] = useState("");
-  const [chatFilter, setChatFilter] = useState<ChatFilter>("all");
-  const [conversations, setConversations] = useState(initialConversations);
-  const [activeChatId, setActiveChatId] = useState(initialConversations[0]?.id ?? "");
+  const auth = useAuthGuard();
+  const { showToast } = useToast();
 
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [openProfile, setOpenProfile] = useState(false);
-  const [openSettings, setOpenSettings] = useState(false);
-  const [isEditingProfile, setIsEditingProfile] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
+  const profileQuery = useProfile(auth.user?._id);
+  const sessionsQuery = useSessions(auth.user?._id);
 
-  const [user, setUser] = useState<IUser>(defaultUser);
-  const [blockedList, setBlockedList] = useState<string[]>(["spam_007", "marketing-bot"]);
-  const [newBlockedUser, setNewBlockedUser] = useState("");
+  const updateProfileMutation = useUpdateProfile(auth.user?._id);
+  const updatePrivacyMutation = useUpdatePrivacy(auth.user?._id);
+  const updateStatusMutation = useUpdateStatus(auth.user?._id);
+  const uploadAvatarMutation = useUploadAvatar(auth.user?._id);
+  const uploadCoverMutation = useUploadCover(auth.user?._id);
+  const changePasswordMutation = useChangePassword();
+  const logoutAllDevicesMutation = useLogoutAllDevices();
 
-  const [uploadingAvatar, setUploadingAvatar] = useState(false);
-  const [uploadingCover, setUploadingCover] = useState(false);
-  const [profileLoading, setProfileLoading] = useState(false);
-  const [passwordLoading, setPasswordLoading] = useState(false);
-  const [saveMessage, setSaveMessage] = useState("");
+  const [search, setSearch] = useState("");
+  const [readFilter, setReadFilter] = useState<ReadFilter>("ALL");
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [profileEditMode, setProfileEditMode] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("GENERAL");
 
-  const [newPassword, setNewPassword] = useState({
-    currentPassword: "",
-    nextPassword: "",
-    confirmPassword: "",
+  const [profileForm, setProfileForm] = useState({
+    fullName: "",
+    gender: "other" as IUser["gender"],
+    dob: "",
+    bio: "",
   });
+
+  const [privacyForm, setPrivacyForm] = useState({
+    showPhone: "FRIEND" as PrivacyStatus,
+    showOnline: true,
+    allowStrangerMessage: false,
+    findByPhone: true,
+  });
+
+  const [passwordForm, setPasswordForm] = useState({ oldPassword: "", newPassword: "", confirmNewPassword: "" });
+  const [generalForm, setGeneralForm] = useState({ startupWithSystem: true, rememberLogin: true, language: "vi" as "vi" | "en" });
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [showOldPassword, setShowOldPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
+
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  const coverInputRef = useRef<HTMLInputElement | null>(null);
+
+  const profile = profileQuery.data;
 
   useEffect(() => {
-    const sessionRaw = localStorage.getItem(FAKE_SESSION_KEY);
-
-    if (!sessionRaw) {
-      router.replace("/login");
+    if (!profile) {
       return;
     }
 
-    try {
-      const session = JSON.parse(sessionRaw) as {
-        fullName?: string;
-        email?: string;
-        phone?: string;
-        avatar?: string;
-      };
+    setProfileForm({
+      fullName: profile.fullName || "",
+      gender: profile.gender || "other",
+      dob: profile.dob ? new Date(profile.dob).toISOString().slice(0, 10) : "",
+      bio: profile.bio || "",
+    });
 
-      setUser((prev) => ({
-        ...prev,
-        fullName: session.fullName || prev.fullName,
-        email: session.email || prev.email,
-        phone: session.phone || prev.phone,
-        avatar: session.avatar || prev.avatar,
-      }));
-    } catch {
-      localStorage.removeItem(FAKE_SESSION_KEY);
-      router.replace("/login");
-      return;
-    }
+    setPrivacyForm({
+      showPhone: profile.privacy?.showPhone || "FRIEND",
+      showOnline: Boolean(profile.privacy?.showOnline),
+      allowStrangerMessage: Boolean(profile.privacy?.allowStrangerMessage),
+      findByPhone: Boolean(profile.privacy?.findByPhone),
+    });
 
-    setIsReady(true);
-  }, [router]);
+    setTwoFactorEnabled(Boolean(profile.settings?.twoFactorAuth));
+  }, [profile]);
 
   const filteredConversations = useMemo(() => {
-    return conversations.filter((item) => {
-      const keywordMatched =
-        item.name.toLowerCase().includes(keyword.toLowerCase()) ||
-        item.lastMessage.toLowerCase().includes(keyword.toLowerCase());
+    return conversationsSeed.filter((item) => {
+      const keyword = `${item.name} ${item.lastMessage}`.toLowerCase();
+      const matchesSearch = keyword.includes(search.toLowerCase().trim());
 
-      const filterMatched =
-        chatFilter === "all" ? true : chatFilter === "unread" ? item.unread > 0 : item.unread === 0;
-
-      return keywordMatched && filterMatched;
-    });
-  }, [chatFilter, conversations, keyword]);
-
-  const activeConversation = useMemo(
-    () => conversations.find((item) => item.id === activeChatId),
-    [activeChatId, conversations]
-  );
-
-  if (!isReady) {
-    return (
-      <main className="flex h-screen items-center justify-center bg-[#111827] text-white">
-        Đang tải QuickChat...
-      </main>
-    );
-  }
-
-  const selectConversation = (id: string) => {
-    setActiveChatId(id);
-    setConversations((prev) => prev.map((item) => (item.id === id ? { ...item, unread: 0 } : item)));
-  };
-
-  const openProfileModal = () => {
-    setMenuOpen(false);
-    setOpenProfile(true);
-  };
-
-  const openSettingsModal = () => {
-    setMenuOpen(false);
-    setSettingsTab("general");
-    setOpenSettings(true);
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem(FAKE_SESSION_KEY);
-    router.replace("/login");
-  };
-
-  const applyUserPatch = (patch: Partial<IUser>) => {
-    setUser((prev) => ({ ...prev, ...patch, updatedAt: new Date() }));
-  };
-
-  const applyPrivacyPatch = (patch: Partial<IUser["privacy"]>) => {
-    setUser((prev) => ({
-      ...prev,
-      updatedAt: new Date(),
-      privacy: {
-        ...prev.privacy,
-        ...patch,
-      },
-    }));
-  };
-
-  const applySettingsPatch = (patch: Partial<IUser["settings"]>) => {
-    setUser((prev) => ({
-      ...prev,
-      updatedAt: new Date(),
-      settings: {
-        ...prev.settings,
-        ...patch,
-      },
-    }));
-  };
-
-  const onUploadAvatar = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-
-    if (!file) {
-      return;
-    }
-
-    setUploadingAvatar(true);
-
-    try {
-      const url = await uploadFileToS3(file);
-      applyUserPatch({ avatar: url });
-      setSaveMessage("Cập nhật avatar thành công.");
-    } catch {
-      setSaveMessage("Upload avatar thất bại. Kiểm tra API upload S3.");
-    } finally {
-      setUploadingAvatar(false);
-      event.target.value = "";
-    }
-  };
-
-  const onUploadCover = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-
-    if (!file) {
-      return;
-    }
-
-    setUploadingCover(true);
-
-    try {
-      const url = await uploadFileToS3(file);
-      applyUserPatch({ coverImage: url });
-      setSaveMessage("Cập nhật ảnh bìa thành công.");
-    } catch {
-      setSaveMessage("Upload ảnh bìa thất bại. Kiểm tra API upload S3.");
-    } finally {
-      setUploadingCover(false);
-      event.target.value = "";
-    }
-  };
-
-  const handleSaveProfile = async () => {
-    setProfileLoading(true);
-    setSaveMessage("");
-
-    try {
-      if (PROFILE_UPDATE_ENDPOINT) {
-        const response = await fetch(PROFILE_UPDATE_ENDPOINT, {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            fullName: user.fullName,
-            gender: user.gender,
-            dob: user.dob?.toISOString(),
-            bio: user.bio,
-            avatar: user.avatar,
-            coverImage: user.coverImage,
-            privacy: user.privacy,
-            settings: user.settings,
-          }),
-        });
-
-        if (!response.ok) {
-          throw new Error("Save profile failed");
-        }
+      if (!matchesSearch) {
+        return false;
       }
 
-      setIsEditingProfile(false);
-      setSaveMessage("Đã cập nhật hồ sơ.");
-    } catch {
-      setSaveMessage("Lưu hồ sơ thất bại. Kiểm tra API update profile.");
-    } finally {
-      setProfileLoading(false);
+      if (readFilter === "UNREAD") {
+        return item.unreadCount > 0;
+      }
+
+      if (readFilter === "READ") {
+        return item.unreadCount === 0;
+      }
+
+      return true;
+    });
+  }, [readFilter, search]);
+
+  useEffect(() => {
+    if (!activeConversationId) {
+      return;
+    }
+
+    const stillExists = filteredConversations.some((item) => item.id === activeConversationId);
+    if (!stillExists) {
+      setActiveConversationId(null);
+    }
+  }, [activeConversationId, filteredConversations]);
+
+  const activeConversation = activeConversationId
+    ? filteredConversations.find((item) => item.id === activeConversationId) || null
+    : null;
+
+  const userName = profile?.fullName || auth.user?.fullName || "QuickChat User";
+  const userInitial = userName.charAt(0).toUpperCase();
+
+  const syncAuthUser = (user: IUser) => {
+    auth.updateCurrentUser({
+      _id: user._id,
+      fullName: user.fullName,
+      email: user.email,
+      phone: user.phone,
+      avatar: user.avatar,
+      coverImage: user.coverImage,
+    });
+  };
+
+  const saveProfile = async () => {
+    try {
+      const updated = await updateProfileMutation.mutateAsync({
+        fullName: profileForm.fullName,
+        gender: profileForm.gender,
+        dob: profileForm.dob || undefined,
+        bio: profileForm.bio,
+      });
+      syncAuthUser(updated);
+      await profileQuery.refetch();
+      setProfileEditMode(false);
+      showToast("Cập nhật hồ sơ thành công", "success");
+    } catch (error) {
+      showToast(getErrorMessage(error), "error");
     }
   };
 
-  const handleChangePassword = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const savePrivacy = async () => {
+    try {
+      await updatePrivacyMutation.mutateAsync(privacyForm);
+      await profileQuery.refetch();
+      showToast("Đã lưu quyền riêng tư", "success");
+    } catch (error) {
+      showToast(getErrorMessage(error), "error");
+    }
+  };
 
-    if (newPassword.nextPassword.length < 6) {
-      setSaveMessage("Mật khẩu mới cần từ 6 ký tự.");
+  const saveStatus = async (isOnline: boolean) => {
+    try {
+      await updateStatusMutation.mutateAsync(isOnline);
+      await profileQuery.refetch();
+      showToast("Đã cập nhật trạng thái hoạt động", "success");
+    } catch (error) {
+      showToast(getErrorMessage(error), "error");
+    }
+  };
+
+  const handleAvatarUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
       return;
     }
-
-    if (newPassword.nextPassword !== newPassword.confirmPassword) {
-      setSaveMessage("Xác nhận mật khẩu chưa khớp.");
-      return;
-    }
-
-    setPasswordLoading(true);
 
     try {
-      setSaveMessage("Đổi mật khẩu thành công (mock).");
-      setNewPassword({
-        currentPassword: "",
-        nextPassword: "",
-        confirmPassword: "",
-      });
+      const updated = await uploadAvatarMutation.mutateAsync(file);
+      syncAuthUser(updated);
+      await profileQuery.refetch();
+      showToast("Cập nhật ảnh đại diện thành công", "success");
+    } catch (error) {
+      showToast(getErrorMessage(error), "error");
     } finally {
-      setPasswordLoading(false);
+      event.target.value = "";
     }
   };
 
-  const addBlockedUser = () => {
-    const value = newBlockedUser.trim();
-
-    if (!value || blockedList.includes(value)) {
+  const handleCoverUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
       return;
     }
 
-    setBlockedList((prev) => [value, ...prev]);
-    setNewBlockedUser("");
+    try {
+      const updated = await uploadCoverMutation.mutateAsync(file);
+      syncAuthUser(updated);
+      await profileQuery.refetch();
+      showToast("Cập nhật ảnh bìa thành công", "success");
+    } catch (error) {
+      showToast(getErrorMessage(error), "error");
+    } finally {
+      event.target.value = "";
+    }
   };
 
+  const handleChangePassword = async () => {
+    if (!auth.user) {
+      return;
+    }
+
+    if (!passwordForm.oldPassword || !passwordForm.newPassword || !passwordForm.confirmNewPassword) {
+      showToast("Vui lòng nhập đủ mật khẩu cũ và mới", "error");
+      return;
+    }
+
+    if (!strongPasswordRegex.test(passwordForm.newPassword)) {
+      showToast("Mật khẩu mới phải có ít nhất 8 ký tự, gồm chữ hoa, chữ thường và chữ số", "error");
+      return;
+    }
+
+    if (passwordForm.newPassword !== passwordForm.confirmNewPassword) {
+      showToast("Xác nhận mật khẩu mới không khớp", "error");
+      return;
+    }
+
+    try {
+      await changePasswordMutation.mutateAsync({
+        userId: auth.user._id,
+        oldPassword: passwordForm.oldPassword,
+        newPassword: passwordForm.newPassword,
+      });
+      setPasswordForm({ oldPassword: "", newPassword: "", confirmNewPassword: "" });
+      showToast("Đổi mật khẩu thành công", "success");
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        showToast("Mật khẩu cũ không chính xác", "error");
+        return;
+      }
+
+      showToast(getErrorMessage(error), "error");
+    }
+  };
+
+  const handleLogoutAllDevices = async () => {
+    if (!auth.user) {
+      return;
+    }
+
+    try {
+      await logoutAllDevicesMutation.mutateAsync({ userId: auth.user._id });
+      await sessionsQuery.refetch();
+      showToast("Đã đăng xuất tất cả thiết bị", "success");
+    } catch (error) {
+      showToast(getErrorMessage(error), "error");
+    }
+  };
+
+  if (!auth.isInitialized || !auth.user) {
+    return <PageLoader />;
+  }
+
   return (
-    <main className="h-screen w-full overflow-hidden bg-[radial-gradient(circle_at_15%_10%,#1d3f56_0%,#0f1f2d_45%,#0b1520_100%)] text-white">
-      <div className="flex h-full w-full bg-white/5 backdrop-blur-sm">
-        <aside className="relative flex w-[70px] shrink-0 flex-col items-center justify-between bg-[linear-gradient(180deg,#15314a,#11273a)] py-4">
-          <div className="flex w-full flex-col items-center gap-3">
+    <main className="h-screen overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-amber-50 text-slate-800">
+      <div className="h-full w-full md:grid md:grid-cols-[72px_330px_1fr_320px]">
+        <aside className="relative hidden h-full flex-col items-center justify-between border-r border-emerald-200 bg-[#0f766e] py-4 text-white md:flex">
+          <div className="space-y-3">
             <button
-              onClick={() => setMenuOpen((prev) => !prev)}
-              className="relative rounded-full border-2 border-[#56e0c6]/70 p-[2px] transition hover:scale-105"
+              onClick={() => setShowAccountMenu((prev) => !prev)}
+              className="relative flex h-11 w-11 items-center justify-center rounded-2xl bg-white/20 text-base font-bold ring-2 ring-white/30 transition hover:bg-white/30"
             >
-              {user.avatar ? (
-                <img src={user.avatar} alt="Avatar" className="size-10 rounded-full object-cover" />
-              ) : (
-                <div className="flex size-10 items-center justify-center rounded-full bg-[linear-gradient(145deg,#56e0c6,#2f93ff)] text-sm font-bold text-slate-900">
-                  {user.fullName.slice(0, 2).toUpperCase()}
-                </div>
-              )}
+              {userInitial}
             </button>
 
-            <button className="relative flex size-10 items-center justify-center rounded-xl bg-[#56e0c6]/20 text-[#9ff3e3] transition hover:bg-[#56e0c6]/35">
-              <MessageCircle className="size-5" />
-              <span className="absolute -right-1 -top-1 rounded-full bg-[#ff7c5c] px-1.5 text-[10px] font-bold leading-4 text-white">
-                8
-              </span>
+            {showAccountMenu ? (
+              <div className="absolute left-16 top-4 z-40 w-72 rounded-2xl border border-emerald-200 bg-white p-4 text-slate-700 shadow-2xl">
+                <div className="mb-3 border-b border-slate-100 pb-3">
+                  <p className="font-semibold">{userName}</p>
+                  <p className="text-sm text-slate-500">{profile?.status?.isOnline ? "Đang hoạt động" : "Hoạt động gần đây"}</p>
+                </div>
+                <div className="space-y-1 text-sm">
+                  <button
+                    onClick={() => {
+                      setShowProfileModal(true);
+                      setShowAccountMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 transition hover:bg-emerald-50"
+                  >
+                    <UserRoundPen size={16} /> Hồ sơ của bạn
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowSettingsModal(true);
+                      setSettingsTab("GENERAL");
+                      setShowAccountMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 transition hover:bg-emerald-50"
+                  >
+                    <Settings size={16} /> Cài đặt
+                  </button>
+                  <button onClick={auth.logout} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-rose-600 transition hover:bg-rose-50">
+                    <LogOut size={16} /> Đăng xuất
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            <button className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20 hover:bg-white/30">
+              <MessageSquare size={18} />
             </button>
-            <button className="flex size-10 items-center justify-center rounded-xl text-[#b6c8d9] transition hover:bg-white/15 hover:text-white">
-              <Users className="size-5" />
+            <button className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20 hover:bg-white/30">
+              <Users size={18} />
             </button>
-            <button className="flex size-10 items-center justify-center rounded-xl text-[#b6c8d9] transition hover:bg-white/15 hover:text-white">
-              <Cloud className="size-5" />
-            </button>
-            <button className="flex size-10 items-center justify-center rounded-xl text-[#b6c8d9] transition hover:bg-white/15 hover:text-white">
-              <SquareDashedBottom className="size-5" />
-            </button>
-            <button className="flex size-10 items-center justify-center rounded-xl text-[#b6c8d9] transition hover:bg-white/15 hover:text-white">
-              <Briefcase className="size-5" />
+            <button className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20 hover:bg-white/30">
+              <BookMarked size={18} />
             </button>
           </div>
 
-          <button
-            onClick={openSettingsModal}
-            className="flex size-10 items-center justify-center rounded-xl text-[#b6c8d9] transition hover:bg-white/15 hover:text-white"
-          >
-            <Settings className="size-5" />
-          </button>
-
-          {menuOpen ? (
-            <div className="absolute left-[78px] top-4 z-30 w-64 rounded-2xl border border-[#2d475f] bg-[#132738] p-3 shadow-2xl">
-              <p className="px-3 pb-2 text-xs uppercase tracking-[0.18em] text-[#80f2df]">Quick Menu</p>
-              <div className="mb-2 rounded-xl bg-[#1b3449] p-3">
-                <p className="text-sm font-semibold">{user.fullName}</p>
-                <p className="text-xs text-[#9cc3df]">{user.status.isOnline ? "Đang hoạt động" : "Không hoạt động"}</p>
-              </div>
-              <button
-                onClick={openProfileModal}
-                className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-[#dde9f7] transition hover:bg-[#1f3a53]"
-              >
-                <CircleUserRound className="size-4" />
-                Hồ sơ của bạn
-              </button>
-              <button
-                onClick={openSettingsModal}
-                className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-[#dde9f7] transition hover:bg-[#1f3a53]"
-              >
-                <Settings className="size-4" />
-                Cài đặt
-              </button>
-              <button
-                onClick={handleLogout}
-                className="mt-1 flex w-full items-center gap-2 rounded-xl px-3 py-2 text-sm text-[#ffd4cb] transition hover:bg-[#4d2b2e]"
-              >
-                <LogOut className="size-4" />
-                Đăng xuất
-              </button>
-            </div>
-          ) : null}
+          <div className="space-y-3">
+            <button className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20 hover:bg-white/30">
+              <Bell size={18} />
+            </button>
+            <button className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20 hover:bg-white/30">
+              <Settings size={18} />
+            </button>
+          </div>
         </aside>
 
-        <section className="flex h-full w-[360px] shrink-0 flex-col border-r border-[#2f4c65] bg-[#eaf0f6] text-[#0f2b3f]">
-          <div className="space-y-3 border-b border-[#c9d9e8] p-4">
-            <div className="flex items-center gap-2">
-              <div className="relative flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[#5f7590]" />
-                <input
-                  value={keyword}
-                  onChange={(event) => setKeyword(event.target.value)}
-                  placeholder="Tìm kiếm cuộc trò chuyện"
-                  className="h-10 w-full rounded-xl border border-[#c7d7e8] bg-white pl-9 pr-3 text-sm outline-none placeholder:text-[#7f93aa] focus:border-[#32b9b0]"
-                />
-              </div>
-              <button className="rounded-lg bg-white p-2 text-[#4f6483] shadow-sm transition hover:bg-[#dff6f2]">
-                <UserPlus className="size-4" />
-              </button>
-              <button className="rounded-lg bg-white p-2 text-[#4f6483] shadow-sm transition hover:bg-[#dff6f2]">
-                <Bell className="size-4" />
-              </button>
+        <section className="border-r border-slate-200 bg-slate-50">
+          <div className="border-b border-slate-200 p-3">
+            <div className="flex items-center gap-2 rounded-xl bg-slate-200/70 px-3 py-2">
+              <Search size={16} className="text-slate-500" />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                className="w-full bg-transparent text-sm outline-none placeholder:text-slate-500"
+                placeholder="Tìm kiếm"
+              />
             </div>
 
-            <div className="flex items-center justify-between gap-2 text-sm">
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setChatFilter("all")}
-                  className={`rounded-lg px-2.5 py-1.5 font-medium transition ${
-                    chatFilter === "all" ? "bg-[#cff4ef] text-[#087067]" : "text-[#5e738e] hover:bg-white"
-                  }`}
-                >
-                  Tất cả
-                </button>
-                <button
-                  onClick={() => setChatFilter("unread")}
-                  className={`rounded-lg px-2.5 py-1.5 font-medium transition ${
-                    chatFilter === "unread" ? "bg-[#cff4ef] text-[#087067]" : "text-[#5e738e] hover:bg-white"
-                  }`}
-                >
-                  Chưa đọc
-                </button>
-                <button
-                  onClick={() => setChatFilter("read")}
-                  className={`rounded-lg px-2.5 py-1.5 font-medium transition ${
-                    chatFilter === "read" ? "bg-[#cff4ef] text-[#087067]" : "text-[#5e738e] hover:bg-white"
-                  }`}
-                >
-                  Đã đọc
-                </button>
+            <div className="mt-3 flex items-center justify-between text-sm">
+              <div className="flex items-center gap-3 font-semibold">
+                <button className="text-emerald-700">Ưu tiên</button>
+                <button className="text-slate-500">Khác</button>
               </div>
-              <span className="inline-flex items-center gap-1 text-[#536c86]">
-                <SlidersHorizontal className="size-4" />
-                Phân loại
-              </span>
+              <div className="flex items-center gap-2 text-slate-500">
+                <span>Phân loại</span>
+                <ChevronDown size={14} />
+              </div>
+            </div>
+
+            <div className="mt-2 flex gap-2">
+              {[
+                { key: "ALL", label: "Tất cả" },
+                { key: "UNREAD", label: "Chưa đọc" },
+                { key: "READ", label: "Đã đọc" },
+              ].map((item) => (
+                <button
+                  key={item.key}
+                  onClick={() => setReadFilter(item.key as ReadFilter)}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                    readFilter === item.key ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-600 hover:bg-slate-300"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              ))}
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto">
+          <div className="h-[calc(100vh-142px)] overflow-y-auto">
             {filteredConversations.map((item) => (
               <button
                 key={item.id}
-                onClick={() => selectConversation(item.id)}
-                className={`flex w-full items-start gap-3 border-b border-[#dce6f0] px-4 py-3 text-left transition hover:bg-[#dff5f1] ${
-                  activeChatId === item.id ? "bg-[#d8f2ee]" : ""
+                onClick={() => setActiveConversationId(item.id)}
+                className={`grid w-full grid-cols-[52px_1fr_auto] gap-3 border-b border-slate-100 px-3 py-3 text-left transition hover:bg-white ${
+                  activeConversationId === item.id ? "bg-white" : "bg-transparent"
                 }`}
               >
-                <div className="relative flex size-11 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(150deg,#4fd5c6,#2e8fff)] text-sm font-semibold text-white shadow-sm">
-                  {item.name.slice(0, 2).toUpperCase()}
-                  {item.online ? (
-                    <span className="absolute bottom-0 right-0 size-3 rounded-full border-2 border-white bg-emerald-400" />
-                  ) : null}
+                <div className={`relative mt-0.5 h-12 w-12 rounded-full bg-gradient-to-br ${item.avatarColor}`}>
+                  {item.online ? <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-emerald-500" /> : null}
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="truncate text-[18px] font-semibold leading-none text-[#15314a]">{item.name}</p>
-                    <span className="shrink-0 text-xs text-[#647a95]">{item.time}</span>
-                  </div>
-                  <div className="mt-1.5 flex items-center justify-between gap-2">
-                    <p className="truncate text-sm text-[#4f6680]">{item.lastMessage}</p>
-                    {item.unread > 0 ? (
-                      <span className="rounded-full bg-[#ff8f73] px-1.5 text-[11px] font-semibold text-white">{item.unread}</span>
-                    ) : (
-                      <CheckCheck className="size-4 text-[#62bdb2]" />
-                    )}
-                  </div>
+                <div className="min-w-0">
+                  <p className="truncate font-semibold text-slate-800">{item.name}</p>
+                  <p className="truncate text-sm text-slate-500">{item.lastMessage}</p>
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <span className="text-xs text-slate-500">{item.time}</span>
+                  {item.unreadCount > 0 ? (
+                    <span className="rounded-full bg-rose-500 px-2 py-0.5 text-xs font-semibold text-white">{item.unreadCount}</span>
+                  ) : null}
                 </div>
               </button>
             ))}
+
+            {filteredConversations.length === 0 ? (
+              <div className="px-5 py-8 text-center text-sm text-slate-500">Không có hội thoại phù hợp bộ lọc.</div>
+            ) : null}
           </div>
         </section>
 
-        <section className="relative hidden flex-1 flex-col items-center justify-center px-6 text-center md:flex">
-          <div className="max-w-3xl rounded-3xl border border-white/15 bg-white/10 p-10 shadow-xl backdrop-blur-sm">
-            <h1 className="text-4xl font-semibold tracking-tight text-white">Chào mừng đến với QuickChat!</h1>
-            <p className="mx-auto mt-4 max-w-xl text-base text-[#c2d6e7]">
-              Không gian trò chuyện mới mượt hơn, gọn hơn và đồng bộ tốt cho nhóm của bạn.
-            </p>
+        <section className="grid h-full grid-rows-[64px_1fr_62px] bg-white">
+          <header className="flex items-center justify-between border-b border-slate-200 px-4">
+            {activeConversation ? (
+              <>
+                <div>
+                  <p className="font-semibold text-slate-800">{activeConversation.name}</p>
+                  <p className="text-xs text-slate-500">{activeConversation.subtitle}</p>
+                </div>
+                <div className="flex items-center gap-3 text-slate-500">
+                  <Phone size={18} className="cursor-pointer" />
+                  <Video size={18} className="cursor-pointer" />
+                  <Search size={18} className="cursor-pointer" />
+                  <MoreHorizontal size={18} className="cursor-pointer" />
+                </div>
+              </>
+            ) : (
+              <div>
+                <p className="font-semibold text-slate-800">QuickChat</p>
+                <p className="text-xs text-slate-500">Chọn một hội thoại để bắt đầu trò chuyện</p>
+              </div>
+            )}
+          </header>
 
-            <div className="mt-8 rounded-2xl border border-white/15 bg-[#0f2436]/80 p-7 text-left">
-              <h2 className="text-2xl font-semibold text-[#84f1df]">QuickChat Team Pro</h2>
-              <p className="mt-2 text-sm leading-6 text-[#bfd3e3]">
-                Tập trung thảo luận công việc, quản lý nhóm và cập nhật tiến độ theo thời gian thực với giao diện cân bằng và trực quan hơn.
+          <div className="overflow-y-auto bg-slate-100/70 px-5 py-4">
+            {activeConversation ? (
+              <div className="space-y-3">
+                {activeConversation.messages.map((message) => {
+                  if (message.sender === "system") {
+                    return (
+                      <div key={message.id} className="mx-auto max-w-xl rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                        {message.text}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div key={message.id} className={`flex ${message.sender === "me" ? "justify-end" : "justify-start"}`}>
+                      <div
+                        className={`max-w-[70%] rounded-2xl px-4 py-2 text-sm ${
+                          message.sender === "me" ? "bg-emerald-600 text-white" : "border border-slate-200 bg-white text-slate-700"
+                        }`}
+                      >
+                        <p>{message.text}</p>
+                        <p className={`mt-1 text-[11px] ${message.sender === "me" ? "text-emerald-100" : "text-slate-400"}`}>{message.time}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="mx-auto mt-8 max-w-2xl">
+                <div className="rounded-3xl border border-emerald-200 bg-gradient-to-r from-emerald-100 to-amber-100 p-6 text-center shadow-sm">
+                  <p className="text-2xl font-bold text-emerald-900">Chào mừng đến với QuickChat PC!</p>
+                  <p className="mt-2 text-sm text-slate-700">
+                    Khám phá những tiện ích hỗ trợ làm việc và trò chuyện cùng người thân, bạn bè được tối ưu hóa cho máy tính của bạn.
+                  </p>
+                </div>
+
+                <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-slate-700 shadow-sm">
+                  <p className="font-semibold text-amber-900">Kinh doanh hiệu quả với zBusiness Pro</p>
+                  <p className="mt-1">
+                    Bán hàng chuyên nghiệp với Nhãn Business và Bộ công cụ kinh doanh, mở khóa tiềm năng tiếp cận khách hàng trên Zalo.
+                  </p>
+                </div>
+
+                <div className="mt-6 grid gap-3 md:grid-cols-3">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <p className="font-semibold text-slate-800">Đồng bộ đa thiết bị</p>
+                    <p className="mt-1 text-xs text-slate-500">Làm việc liên tục trên mọi nền tảng.</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <p className="font-semibold text-slate-800">Bảo mật linh hoạt</p>
+                    <p className="mt-1 text-xs text-slate-500">Quản lý phiên đăng nhập và quyền riêng tư.</p>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <p className="font-semibold text-slate-800">Giao diện tối ưu</p>
+                    <p className="mt-1 text-xs text-slate-500">Không gian làm việc gọn gàng, trực quan.</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 border-t border-slate-200 px-4">
+            <button className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100" disabled={!activeConversation}>
+              <ImageIcon size={18} />
+            </button>
+            <button className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100" disabled={!activeConversation}>
+              <Sparkles size={18} />
+            </button>
+            <input
+              placeholder={activeConversation ? `Nhập tin nhắn tới ${activeConversation.name}` : "Chọn hội thoại để bắt đầu nhắn tin"}
+              className="h-10 flex-1 bg-transparent text-sm outline-none"
+              disabled={!activeConversation}
+            />
+            <button className="rounded-full bg-emerald-600 p-2 text-white transition hover:bg-emerald-500 disabled:opacity-50" disabled={!activeConversation}>
+              <Send size={16} />
+            </button>
+          </div>
+        </section>
+
+        <aside className="hidden border-l border-slate-200 bg-slate-50 lg:block">
+          <div className="border-b border-slate-200 px-4 py-4 text-center">
+            {activeConversation ? (
+              <>
+                <div className="mx-auto h-20 w-20 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500" />
+                <p className="mt-3 text-2xl font-bold text-slate-800">{activeConversation.name}</p>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-600">
+                  <button className="rounded-xl bg-white p-2 shadow-sm">
+                    <Bell size={14} className="mx-auto" /> Tắt thông báo
+                  </button>
+                  <button className="rounded-xl bg-white p-2 shadow-sm">
+                    <BookMarked size={14} className="mx-auto" /> Ghim hội thoại
+                  </button>
+                  <button className="rounded-xl bg-white p-2 shadow-sm">
+                    <Users size={14} className="mx-auto" /> Tạo nhóm
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
+                  <CircleUserRound size={34} />
+                </div>
+                <p className="mt-3 text-lg font-bold text-slate-800">Thông tin hội thoại</p>
+                <p className="mt-1 text-sm text-slate-500">Hãy chọn một cuộc trò chuyện để xem chi tiết.</p>
+              </>
+            )}
+          </div>
+
+          <div className="space-y-2 p-4 text-sm">
+            <div className="rounded-xl bg-white p-3 shadow-sm">
+              <p className="mb-2 flex items-center gap-2 font-semibold text-slate-700">
+                <Dot /> Danh sách nhắc hẹn
               </p>
-              <button className="mt-5 rounded-xl bg-[linear-gradient(90deg,#47d7c5,#4da7ff)] px-5 py-2.5 text-sm font-semibold text-[#0c2538] transition hover:brightness-110">
-                Khám phá không gian nhóm
-              </button>
+              <p className="text-slate-500">2 nhóm chung</p>
+            </div>
+
+            <div className="rounded-xl bg-white p-3 shadow-sm">
+              <p className="mb-2 font-semibold text-slate-700">Ảnh/Video</p>
+              <div className="grid grid-cols-3 gap-2">
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <div key={`thumb-${index}`} className="aspect-square rounded-lg bg-gradient-to-br from-slate-200 to-slate-300" />
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-white p-3 shadow-sm">
+              <p className="mb-2 font-semibold text-slate-700">Tệp</p>
+              <div className="flex items-center justify-between rounded-lg bg-slate-100 px-3 py-2">
+                <span>Proposal_Q2.pdf</span>
+                <span className="text-xs text-slate-500">4.2MB</span>
+              </div>
             </div>
           </div>
-
-          <div className="mt-6 flex items-center gap-3">
-            <span className="size-2 rounded-full bg-white/30" />
-            <span className="size-2 rounded-full bg-[#5ee7d0]" />
-            <span className="size-2 rounded-full bg-white/30" />
-            <span className="size-2 rounded-full bg-white/30" />
-          </div>
-
-          {activeConversation ? (
-            <div className="mt-8 rounded-2xl border border-white/15 bg-white/10 px-6 py-4 text-left text-sm text-[#dce9f4]">
-              Đang mở: <span className="font-semibold text-white">{activeConversation.name}</span>
-            </div>
-          ) : null}
-        </section>
-
-        <section className="flex flex-1 items-center justify-center p-8 text-center text-white/80 md:hidden">
-          Chọn cuộc trò chuyện để bắt đầu.
-        </section>
+        </aside>
       </div>
 
-      {openProfile ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/55 p-4">
-          <div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-[#f1f4f8] text-[#22324a] shadow-2xl">
-            <div className="flex items-center justify-between border-b border-[#d2dbe5] bg-white px-6 py-4">
-              <h3 className="text-2xl font-semibold">Thông tin tài khoản</h3>
-              <button onClick={() => setOpenProfile(false)} className="rounded-md p-1 text-[#5d738f] hover:bg-[#e7edf4]">
-                <X className="size-6" />
+      {showProfileModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+          <div className="scrollbar-hide max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl">
+            <div className="relative h-44 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500">
+              {profile?.coverImage ? <Image src={profile.coverImage} alt="Ảnh bìa" fill className="object-cover" unoptimized /> : null}
+              <button
+                onClick={() => setShowProfileModal(false)}
+                className="absolute right-3 top-3 rounded-lg bg-white/90 p-2 text-slate-700 hover:bg-white"
+                aria-label="Đóng hồ sơ"
+              >
+                <X size={18} />
               </button>
-            </div>
+              <button
+                onClick={() => coverInputRef.current?.click()}
+                className="absolute right-14 top-3 inline-flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-[11px] font-semibold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-white"
+              >
+                Sửa ảnh bìa
+              </button>
+              <input ref={coverInputRef} type="file" className="hidden" accept="image/*" onChange={handleCoverUpload} />
 
-            <div className="relative h-44 bg-[#0f2436]">
-              {user.coverImage ? <img src={user.coverImage} alt="Cover" className="h-full w-full object-cover" /> : null}
-              <label className="absolute right-4 top-4 cursor-pointer rounded-lg bg-black/50 px-3 py-1.5 text-xs font-medium text-white">
-                {uploadingCover ? "Đang upload..." : "Đổi ảnh bìa"}
-                <input type="file" accept="image/*" className="hidden" onChange={onUploadCover} />
-              </label>
-            </div>
-
-            <div className="relative px-6 pb-6 pt-14">
-              <div className="absolute -top-12 left-6 size-24 overflow-hidden rounded-full border-4 border-[#f1f4f8] bg-white">
-                {user.avatar ? (
-                  <img src={user.avatar} alt="Avatar" className="h-full w-full object-cover" />
-                ) : (
-                  <div className="flex h-full w-full items-center justify-center bg-[linear-gradient(145deg,#4fd5c6,#2e8fff)] text-xl font-bold text-white">
-                    {user.fullName.slice(0, 2).toUpperCase()}
-                  </div>
-                )}
-              </div>
-
-              <label className="absolute left-24 top-9 cursor-pointer rounded-full border border-[#b8c7d8] bg-white p-2 text-[#415a78] shadow-sm">
-                {uploadingAvatar ? <span className="px-1 text-[10px]">...</span> : <BookImage className="size-4" />}
-                <input type="file" accept="image/*" className="hidden" onChange={onUploadAvatar} />
-              </label>
-
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <h4 className="text-4xl font-semibold">{user.fullName}</h4>
-                  <p className="mt-1 text-sm text-[#57708d]">{user.status.isOnline ? "Đang hoạt động" : "Không hoạt động"}</p>
+              <div className="absolute -bottom-12 left-6 flex items-end gap-3">
+                <div className="relative flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-gradient-to-br from-emerald-400 to-cyan-600 text-3xl font-bold text-white">
+                  {profile?.avatar ? <Image src={profile.avatar} alt="Ảnh đại diện" fill className="object-cover" unoptimized /> : userInitial}
                 </div>
                 <button
-                  onClick={() => setIsEditingProfile((prev) => !prev)}
-                  className="rounded-xl bg-[#d8ebff] px-4 py-2 text-sm font-semibold text-[#134672] transition hover:bg-[#c6e0fb]"
+                  onClick={() => avatarInputRef.current?.click()}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-slate-800"
                 >
-                  {isEditingProfile ? "Xong" : "Cập nhật"}
+                  Cập nhật avatar
                 </button>
+                <input ref={avatarInputRef} type="file" className="hidden" accept="image/*" onChange={handleAvatarUpload} />
               </div>
+            </div>
 
-              <div className="mt-6 rounded-2xl bg-white p-5 shadow-sm">
-                <h5 className="text-3xl font-semibold">Thông tin cá nhân</h5>
-
-                <div className="mt-4 grid grid-cols-[130px_1fr] gap-y-2 text-[17px]">
-                  <p className="text-[#61788f]">Giới tính</p>
-                  {isEditingProfile ? (
-                    <select
-                      value={user.gender}
-                      onChange={(event) => applyUserPatch({ gender: event.target.value as IUser["gender"] })}
-                      className="w-full rounded-lg border border-[#d4dde7] bg-white px-3 py-2 text-sm"
-                    >
-                      <option value="male">Nam</option>
-                      <option value="female">Nữ</option>
-                      <option value="other">Khác</option>
-                    </select>
-                  ) : (
-                    <p className="font-medium">{user.gender === "male" ? "Nam" : user.gender === "female" ? "Nữ" : "Khác"}</p>
-                  )}
-
-                  <p className="text-[#61788f]">Ngày sinh</p>
-                  {isEditingProfile ? (
-                    <input
-                      type="date"
-                      value={toInputDate(user.dob)}
-                      onChange={(event) => applyUserPatch({ dob: new Date(event.target.value) })}
-                      className="w-full rounded-lg border border-[#d4dde7] bg-white px-3 py-2 text-sm"
-                    />
-                  ) : (
-                    <p className="font-medium">{user.dob ? user.dob.toLocaleDateString("vi-VN") : "Chưa cập nhật"}</p>
-                  )}
-
-                  <p className="text-[#61788f]">Điện thoại</p>
-                  <p className="font-medium">{user.phone}</p>
-
-                  <p className="text-[#61788f]">Email</p>
-                  <p className="font-medium">{user.email}</p>
-
-                  <p className="text-[#61788f]">Tên hiển thị</p>
-                  {isEditingProfile ? (
-                    <input
-                      value={user.fullName}
-                      onChange={(event) => applyUserPatch({ fullName: event.target.value })}
-                      className="w-full rounded-lg border border-[#d4dde7] bg-white px-3 py-2 text-sm"
-                    />
-                  ) : (
-                    <p className="font-medium">{user.fullName}</p>
-                  )}
-
-                  <p className="text-[#61788f]">Bio</p>
-                  {isEditingProfile ? (
-                    <textarea
-                      value={user.bio || ""}
-                      onChange={(event) => applyUserPatch({ bio: event.target.value })}
-                      rows={2}
-                      className="w-full rounded-lg border border-[#d4dde7] bg-white px-3 py-2 text-sm"
-                    />
-                  ) : (
-                    <p className="font-medium">{user.bio || "Chưa cập nhật"}</p>
-                  )}
+            <div className="px-6 pb-6 pt-16">
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h3 className="text-2xl font-bold tracking-tight text-slate-900">Hồ sơ của bạn</h3>
+                  <p className="mt-1 text-sm text-slate-500">Chỉnh sửa thông tin cá nhân của bạn.</p>
                 </div>
-
-                {saveMessage ? <p className="mt-4 text-sm text-[#0c746b]">{saveMessage}</p> : null}
-
-                {isEditingProfile ? (
+                <div className="flex gap-2">
                   <button
-                    onClick={handleSaveProfile}
-                    disabled={profileLoading}
-                    className="mt-5 rounded-xl bg-[linear-gradient(90deg,#47d7c5,#4da7ff)] px-5 py-2 text-sm font-semibold text-[#0c2538] transition hover:brightness-110 disabled:opacity-60"
+                    onClick={() => setProfileEditMode((prev) => !prev)}
+                    className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
+                      profileEditMode
+                        ? "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                        : "bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow-lg hover:-translate-y-0.5"
+                    }`}
                   >
-                    {profileLoading ? "Đang lưu..." : "Lưu cập nhật"}
+                    {profileEditMode ? "Xem hồ sơ" : "Cập nhật"}
                   </button>
-                ) : null}
+                  <button onClick={() => setShowProfileModal(false)} className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50">
+                    Đóng
+                  </button>
+                </div>
               </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="text-sm text-slate-600">
+                  Họ tên
+                  <input
+                    disabled={!profileEditMode}
+                    value={profileForm.fullName}
+                    onChange={(event) => setProfileForm((prev) => ({ ...prev, fullName: event.target.value }))}
+                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+                  />
+                </label>
+                <label className="text-sm text-slate-600">
+                  Giới tính
+                  <select
+                    disabled={!profileEditMode}
+                    value={profileForm.gender}
+                    onChange={(event) => setProfileForm((prev) => ({ ...prev, gender: event.target.value as IUser["gender"] }))}
+                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+                  >
+                    <option value="male">Nam</option>
+                    <option value="female">Nữ</option>
+                    <option value="other">Khác</option>
+                  </select>
+                </label>
+                <label className="text-sm text-slate-600">
+                  Ngày sinh
+                  <input
+                    type="date"
+                    disabled={!profileEditMode}
+                    value={profileForm.dob}
+                    onChange={(event) => setProfileForm((prev) => ({ ...prev, dob: event.target.value }))}
+                    className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+                  />
+                </label>
+                <label className="text-sm text-slate-600">
+                  Số điện thoại
+                  <input value={profile?.phone || auth.user.phone} disabled className="mt-1 w-full rounded-xl border border-slate-300 bg-slate-100 px-3 py-2" />
+                </label>
+                <label className="text-sm text-slate-600 md:col-span-2">
+                  Email
+                  <input value={profile?.email || auth.user.email} disabled className="mt-1 w-full rounded-xl border border-slate-300 bg-slate-100 px-3 py-2" />
+                </label>
+                <label className="text-sm text-slate-600 md:col-span-2">
+                  Tiểu sử
+                  <textarea
+                    disabled={!profileEditMode}
+                    value={profileForm.bio}
+                    onChange={(event) => setProfileForm((prev) => ({ ...prev, bio: event.target.value }))}
+                    className="mt-1 h-24 w-full rounded-xl border border-slate-300 px-3 py-2 disabled:bg-slate-100"
+                  />
+                </label>
+              </div>
+
+              {profileEditMode ? (
+                <div className="mt-4 flex justify-end">
+                  <button
+                    onClick={saveProfile}
+                    disabled={updateProfileMutation.isPending}
+                    className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-emerald-500 to-cyan-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg transition hover:-translate-y-0.5 disabled:opacity-60"
+                  >
+                    {updateProfileMutation.isPending ? "Đang cập nhật..." : "Lưu thay đổi"}
+                  </button>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
       ) : null}
 
-      {openSettings ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/55 p-4">
-          <div className="flex h-[88vh] w-full max-w-5xl overflow-hidden rounded-2xl bg-[#eef2f7] text-[#21344a] shadow-2xl">
-            <aside className="w-72 border-r border-[#ced8e4] bg-[#f8fbff] p-4">
+      {showSettingsModal ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">
+          <div className="flex h-[78vh] w-full max-w-5xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <aside className="w-64 border-r border-slate-200 bg-slate-50 p-4">
               <div className="mb-4 flex items-center justify-between">
-                <h3 className="text-2xl font-semibold">Cài đặt</h3>
-                <button onClick={() => setOpenSettings(false)} className="rounded-md p-1 text-[#607997] hover:bg-[#e7eef6]">
-                  <X className="size-6" />
+                <h3 className="text-xl font-bold text-slate-800">Cài đặt</h3>
+                <button onClick={() => setShowSettingsModal(false)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-200" aria-label="Đóng cài đặt">
+                  <X size={18} />
                 </button>
               </div>
-              <div className="space-y-1">
-                {settingsItems.map((item) => {
-                  const Icon = item.icon;
 
+              <div className="space-y-1 text-sm">
+                {[
+                  { key: "GENERAL", label: "Cài đặt chung", icon: Settings },
+                  { key: "SECURITY", label: "Tài khoản và bảo mật", icon: ShieldCheck },
+                  { key: "PRIVACY", label: "Quyền riêng tư", icon: Eye },
+                  { key: "SESSIONS", label: "Quản lý phiên đăng nhập", icon: KeyRound },
+                ].map((item) => {
+                  const Icon = item.icon;
                   return (
                     <button
                       key={item.key}
-                      onClick={() => setSettingsTab(item.key)}
-                      className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm transition ${
-                        settingsTab === item.key
-                          ? "bg-[#d5e9ff] font-semibold text-[#174f80]"
-                          : "text-[#4f6580] hover:bg-[#e9f1fa]"
+                      onClick={() => setSettingsTab(item.key as SettingsTab)}
+                      className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition ${
+                        settingsTab === item.key ? "bg-emerald-100 font-semibold text-emerald-900" : "text-slate-600 hover:bg-slate-200"
                       }`}
                     >
-                      <Icon className="size-4" />
+                      <Icon size={16} />
                       {item.label}
                     </button>
                   );
@@ -790,32 +841,32 @@ export default function HomePage() {
               </div>
             </aside>
 
-            <section className="flex-1 overflow-y-auto p-6">
-              {settingsTab === "general" ? (
-                <div className="space-y-6">
-                  <div>
-                    <h4 className="text-3xl font-semibold">Danh bạ</h4>
-                    <p className="mt-1 text-sm text-[#607896]">Danh sách bạn bè được hiển thị trong danh bạ</p>
-                    <div className="mt-3 rounded-xl bg-white p-4 shadow-sm">
-                      <label className="flex items-center justify-between py-2">
-                        <span>Hiển thị tất cả bạn bè</span>
-                        <input type="radio" name="friend-filter" />
+            <section className="flex-1 overflow-y-auto bg-slate-100 p-6">
+              {settingsTab === "GENERAL" ? (
+                <div className="space-y-5">
+                  <div className="rounded-2xl bg-white p-4 shadow-sm">
+                    <p className="text-lg font-semibold text-slate-800">Danh bạ</p>
+                    <p className="mt-1 text-sm text-slate-500">Danh sách bạn bè được hiển thị trong danh bạ</p>
+                    <div className="mt-3 space-y-2">
+                      <label className="flex items-center justify-between rounded-xl bg-slate-100 px-3 py-2 text-sm">
+                        Hiển thị tất cả bạn bè
+                        <input type="radio" name="friends-display" className="h-4 w-4" defaultChecked />
                       </label>
-                      <label className="flex items-center justify-between py-2">
-                        <span>Chỉ hiển thị bạn bè đang sử dụng QuickChat</span>
-                        <input type="radio" name="friend-filter" defaultChecked />
+                      <label className="flex items-center justify-between rounded-xl bg-slate-100 px-3 py-2 text-sm">
+                        Chỉ hiển thị bạn bè đang sử dụng Zalo
+                        <input type="radio" name="friends-display" className="h-4 w-4" />
                       </label>
                     </div>
                   </div>
 
-                  <div>
-                    <h4 className="text-3xl font-semibold">Ngôn ngữ</h4>
-                    <div className="mt-3 flex items-center justify-between rounded-xl bg-white p-4 shadow-sm">
+                  <div className="rounded-2xl bg-white p-4 shadow-sm">
+                    <p className="text-lg font-semibold text-slate-800">Ngôn ngữ</p>
+                    <div className="mt-3 flex items-center justify-between rounded-xl bg-slate-100 px-3 py-2 text-sm">
                       <span>Thay đổi ngôn ngữ</span>
                       <select
-                        value={user.settings.language}
-                        onChange={(event) => applySettingsPatch({ language: event.target.value as "vi" | "en" })}
-                        className="rounded-lg border border-[#d4dde8] bg-white px-3 py-2 text-sm"
+                        value={generalForm.language}
+                        onChange={(event) => setGeneralForm((prev) => ({ ...prev, language: event.target.value as "vi" | "en" }))}
+                        className="rounded-lg border border-slate-300 bg-white px-2 py-1"
                       >
                         <option value="vi">Tiếng Việt</option>
                         <option value="en">English</option>
@@ -823,218 +874,228 @@ export default function HomePage() {
                     </div>
                   </div>
 
-                  <div>
-                    <h4 className="text-3xl font-semibold">Khởi động & ghi nhớ tài khoản</h4>
-                    <div className="mt-3 rounded-xl bg-white p-4 shadow-sm">
-                      <label className="flex items-center justify-between py-2">
-                        <span>Khởi động QuickChat khi mở máy</span>
-                        <input type="checkbox" defaultChecked className="size-5" />
+                  <div className="rounded-2xl bg-white p-4 shadow-sm">
+                    <p className="text-lg font-semibold text-slate-800">Khởi động và ghi nhớ tài khoản</p>
+                    <div className="mt-3 space-y-2">
+                      <label className="flex items-center justify-between rounded-xl bg-slate-100 px-3 py-2 text-sm">
+                        Khởi động QuickChat khi mở máy
+                        <input
+                          type="checkbox"
+                          checked={generalForm.startupWithSystem}
+                          onChange={(event) => setGeneralForm((prev) => ({ ...prev, startupWithSystem: event.target.checked }))}
+                          className="h-4 w-4"
+                        />
                       </label>
-                      <label className="flex items-center justify-between py-2">
-                        <span>Ghi nhớ tài khoản đăng nhập</span>
-                        <input type="checkbox" defaultChecked className="size-5" />
+                      <label className="flex items-center justify-between rounded-xl bg-slate-100 px-3 py-2 text-sm">
+                        Ghi nhớ tài khoản đăng nhập
+                        <input
+                          type="checkbox"
+                          checked={generalForm.rememberLogin}
+                          onChange={(event) => setGeneralForm((prev) => ({ ...prev, rememberLogin: event.target.checked }))}
+                          className="h-4 w-4"
+                        />
                       </label>
                     </div>
                   </div>
-                </div>
-              ) : null}
 
-              {settingsTab === "security" ? (
-                <div className="space-y-6">
-                  <div className="rounded-xl bg-white p-5 shadow-sm">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h4 className="text-2xl font-semibold">Xác thực 2 lớp</h4>
-                        <p className="mt-1 text-sm text-[#5f7895]">Bảo vệ tài khoản tốt hơn bằng xác thực hai lớp.</p>
-                      </div>
+                  <div className="rounded-2xl bg-white p-4 shadow-sm">
+                    <p className="text-lg font-semibold text-slate-800">Trạng thái hoạt động</p>
+                    <div className="mt-3 flex items-center justify-between rounded-xl bg-slate-100 px-3 py-2 text-sm">
+                      <span>Hiển thị đang online</span>
                       <input
                         type="checkbox"
-                        checked={user.settings.twoFactorAuth}
-                        onChange={(event) => applySettingsPatch({ twoFactorAuth: event.target.checked })}
-                        className="size-5"
+                        checked={Boolean(profile?.status?.isOnline)}
+                        onChange={(event) => saveStatus(event.target.checked)}
+                        disabled={updateStatusMutation.isPending}
+                        className="h-4 w-4"
                       />
                     </div>
                   </div>
-
-                  <form onSubmit={handleChangePassword} className="rounded-xl bg-white p-5 shadow-sm">
-                    <h4 className="text-2xl font-semibold">Đổi mật khẩu</h4>
-                    <div className="mt-4 grid gap-3">
-                      <input
-                        type="password"
-                        placeholder="Mật khẩu hiện tại"
-                        value={newPassword.currentPassword}
-                        onChange={(event) =>
-                          setNewPassword((prev) => ({
-                            ...prev,
-                            currentPassword: event.target.value,
-                          }))
-                        }
-                        className="h-11 rounded-lg border border-[#d5deea] bg-white px-3 text-sm"
-                      />
-                      <input
-                        type="password"
-                        placeholder="Mật khẩu mới"
-                        value={newPassword.nextPassword}
-                        onChange={(event) =>
-                          setNewPassword((prev) => ({
-                            ...prev,
-                            nextPassword: event.target.value,
-                          }))
-                        }
-                        className="h-11 rounded-lg border border-[#d5deea] bg-white px-3 text-sm"
-                      />
-                      <input
-                        type="password"
-                        placeholder="Xác nhận mật khẩu mới"
-                        value={newPassword.confirmPassword}
-                        onChange={(event) =>
-                          setNewPassword((prev) => ({
-                            ...prev,
-                            confirmPassword: event.target.value,
-                          }))
-                        }
-                        className="h-11 rounded-lg border border-[#d5deea] bg-white px-3 text-sm"
-                      />
-                    </div>
-
-                    <button
-                      type="submit"
-                      disabled={passwordLoading}
-                      className="mt-4 rounded-xl bg-[linear-gradient(90deg,#47d7c5,#4da7ff)] px-5 py-2 text-sm font-semibold text-[#0c2538] transition hover:brightness-110 disabled:opacity-60"
-                    >
-                      {passwordLoading ? "Đang xử lý..." : "Đổi mật khẩu"}
-                    </button>
-                  </form>
                 </div>
               ) : null}
 
-              {settingsTab === "privacy" ? (
-                <div className="space-y-6">
-                  <div className="rounded-xl bg-white p-5 shadow-sm">
-                    <h4 className="text-2xl font-semibold">Cá nhân</h4>
-                    <div className="mt-3 space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <span>Hiển thị ngày sinh</span>
-                        <select
-                          value={user.privacy.showPhone}
-                          onChange={(event) => applyPrivacyPatch({ showPhone: event.target.value as PrivacyStatus })}
-                          className="rounded-lg border border-[#d4dde8] bg-white px-3 py-2 text-sm"
-                        >
-                          <option value="ALL">Tất cả</option>
-                          <option value="FRIEND">Bạn bè</option>
-                          <option value="PRIVATE">Không hiển thị</option>
-                        </select>
-                      </div>
-                      <label className="flex items-center justify-between">
-                        <span>Hiển thị trạng thái truy cập</span>
-                        <input
-                          type="checkbox"
-                          checked={user.privacy.showOnline}
-                          onChange={(event) => applyPrivacyPatch({ showOnline: event.target.checked })}
-                          className="size-5"
-                        />
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl bg-white p-5 shadow-sm">
-                    <h4 className="text-2xl font-semibold">Tin nhắn và cuộc gọi</h4>
-                    <div className="mt-3 space-y-3">
-                      <label className="flex items-center justify-between">
-                        <span>Hiển thị trạng thái &quot;Đã xem&quot;</span>
-                        <input
-                          type="checkbox"
-                          checked={user.privacy.allowStrangerMessage}
-                          onChange={(event) => applyPrivacyPatch({ allowStrangerMessage: event.target.checked })}
-                          className="size-5"
-                        />
-                      </label>
-
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p>Cho phép nhắn tin</p>
-                          <p className="text-sm text-[#65809f]">Ai được nhắn tin cho bạn</p>
-                        </div>
-                        <select className="rounded-lg border border-[#d4dde8] bg-white px-3 py-2 text-sm">
-                          <option>Tất cả mọi người</option>
-                          <option>Bạn bè</option>
-                          <option>Không ai</option>
-                        </select>
-                      </div>
-
-                      <div className="flex items-center justify-between gap-3">
-                        <div>
-                          <p>Cho phép gọi điện</p>
-                          <p className="text-sm text-[#65809f]">Ai được gọi cho bạn</p>
-                        </div>
-                        <select className="rounded-lg border border-[#d4dde8] bg-white px-3 py-2 text-sm">
-                          <option>Bạn bè và người lạ từng liên hệ</option>
-                          <option>Chỉ bạn bè</option>
-                          <option>Không ai</option>
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl bg-white p-5 shadow-sm">
-                    <h4 className="text-2xl font-semibold">Quyền riêng tư theo database</h4>
-                    <div className="mt-3 grid gap-3">
-                      <div className="flex items-center justify-between">
-                        <span>Hiển thị số điện thoại với</span>
-                        <select
-                          value={user.privacy.showPhone}
-                          onChange={(event) => applyPrivacyPatch({ showPhone: event.target.value as PrivacyStatus })}
-                          className="rounded-lg border border-[#d4dde8] bg-white px-3 py-2 text-sm"
-                        >
-                          <option value="ALL">{statusLabel("ALL")}</option>
-                          <option value="FRIEND">{statusLabel("FRIEND")}</option>
-                          <option value="PRIVATE">{statusLabel("PRIVATE")}</option>
-                        </select>
-                      </div>
-                      <label className="flex items-center justify-between">
-                        <span>Cho phép tìm bằng số điện thoại</span>
-                        <input
-                          type="checkbox"
-                          checked={user.privacy.findByPhone}
-                          onChange={(event) => applyPrivacyPatch({ findByPhone: event.target.checked })}
-                          className="size-5"
-                        />
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl bg-white p-5 shadow-sm">
-                    <h4 className="text-2xl font-semibold">Chặn tin nhắn</h4>
-                    <div className="mt-3 flex gap-2">
+              {settingsTab === "SECURITY" ? (
+                <div className="space-y-5">
+                  <div className="rounded-2xl bg-white p-4 shadow-sm">
+                    <p className="mb-3 text-lg font-semibold text-slate-800">Tài khoản và bảo mật</p>
+                    <label className="flex items-center justify-between rounded-xl bg-slate-100 px-3 py-2 text-sm">
+                      Bật bảo mật 2 lớp
                       <input
-                        value={newBlockedUser}
-                        onChange={(event) => setNewBlockedUser(event.target.value)}
-                        placeholder="Nhập username cần chặn"
-                        className="h-10 flex-1 rounded-lg border border-[#d4dde8] px-3 text-sm"
+                        type="checkbox"
+                        checked={twoFactorEnabled}
+                        onChange={(event) => setTwoFactorEnabled(event.target.checked)}
+                        className="h-4 w-4"
                       />
-                      <button
-                        onClick={addBlockedUser}
-                        type="button"
-                        className="rounded-lg bg-[#e4ecf7] px-3 text-sm font-medium text-[#1f466b]"
-                      >
-                        Thêm
-                      </button>
-                    </div>
+                    </label>
+                    <p className="mt-2 text-xs text-slate-500">Hiện tại chỉ lưu giao diện, có thể nối API 2FA khi backend cung cấp endpoint.</p>
+                  </div>
 
-                    <div className="mt-3 space-y-2">
-                      {blockedList.map((item) => (
-                        <div key={item} className="flex items-center justify-between rounded-lg border border-[#e0e7f1] px-3 py-2 text-sm">
-                          <span>{item}</span>
+                  <div className="rounded-2xl bg-white p-4 shadow-sm">
+                    <p className="mb-3 text-lg font-semibold text-slate-800">Đổi mật khẩu</p>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="text-sm text-slate-600">
+                        Mật khẩu cũ
+                        <div className="relative mt-1">
+                          <input
+                            type={showOldPassword ? "text" : "password"}
+                            value={passwordForm.oldPassword}
+                            onChange={(event) => setPasswordForm((prev) => ({ ...prev, oldPassword: event.target.value }))}
+                            className="w-full rounded-xl border border-slate-300 px-3 py-2 pr-10"
+                          />
                           <button
                             type="button"
-                            onClick={() => setBlockedList((prev) => prev.filter((name) => name !== item))}
-                            className="text-[#cd4b4b]"
+                            onClick={() => setShowOldPassword((prev) => !prev)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-500 transition hover:bg-slate-100"
                           >
-                            Bỏ chặn
+                            {showOldPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                           </button>
                         </div>
-                      ))}
+                      </label>
+                      <label className="text-sm text-slate-600 md:col-span-1">
+                        Mật khẩu mới
+                        <div className="relative mt-1">
+                          <input
+                            type={showNewPassword ? "text" : "password"}
+                            value={passwordForm.newPassword}
+                            onChange={(event) => setPasswordForm((prev) => ({ ...prev, newPassword: event.target.value }))}
+                            className="w-full rounded-xl border border-slate-300 px-3 py-2 pr-10"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowNewPassword((prev) => !prev)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-500 transition hover:bg-slate-100"
+                          >
+                            {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
+                      </label>
+                      <label className="text-sm text-slate-600 md:col-span-2">
+                        Xác nhận mật khẩu mới
+                        <div className="relative mt-1">
+                          <input
+                            type={showConfirmNewPassword ? "text" : "password"}
+                            value={passwordForm.confirmNewPassword}
+                            onChange={(event) => setPasswordForm((prev) => ({ ...prev, confirmNewPassword: event.target.value }))}
+                            className="w-full rounded-xl border border-slate-300 px-3 py-2 pr-10"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowConfirmNewPassword((prev) => !prev)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-500 transition hover:bg-slate-100"
+                          >
+                            {showConfirmNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
+                      </label>
                     </div>
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        onClick={handleChangePassword}
+                        disabled={changePasswordMutation.isPending}
+                        className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                      >
+                        {changePasswordMutation.isPending ? "Đang xử lý..." : "Đổi mật khẩu"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {settingsTab === "PRIVACY" ? (
+                <div className="space-y-5">
+                  <div className="rounded-2xl bg-white p-4 shadow-sm">
+                    <p className="mb-3 text-lg font-semibold text-slate-800">Quyền riêng tư</p>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="text-sm text-slate-600">
+                        Hiển thị thông tin cá nhân với
+                        <select
+                          value={privacyForm.showPhone}
+                          onChange={(event) => setPrivacyForm((prev) => ({ ...prev, showPhone: event.target.value as PrivacyStatus }))}
+                          className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2"
+                        >
+                          <option value="ALL">ALL</option>
+                          <option value="FRIEND">FRIEND</option>
+                          <option value="PRIVATE">PRIVATE</option>
+                        </select>
+                      </label>
+
+                      <label className="flex items-center justify-between rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-700">
+                        Cho phép tìm mình bằng số điện thoại
+                        <input
+                          type="checkbox"
+                          checked={privacyForm.findByPhone}
+                          onChange={(event) => setPrivacyForm((prev) => ({ ...prev, findByPhone: event.target.checked }))}
+                          className="h-4 w-4"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-700">
+                        Hiển thị trạng thái online
+                        <input
+                          type="checkbox"
+                          checked={privacyForm.showOnline}
+                          onChange={(event) => setPrivacyForm((prev) => ({ ...prev, showOnline: event.target.checked }))}
+                          className="h-4 w-4"
+                        />
+                      </label>
+
+                      <label className="flex items-center justify-between rounded-xl bg-slate-100 px-3 py-2 text-sm text-slate-700">
+                        Cho phép nhận tin nhắn từ người lạ
+                        <input
+                          type="checkbox"
+                          checked={privacyForm.allowStrangerMessage}
+                          onChange={(event) => setPrivacyForm((prev) => ({ ...prev, allowStrangerMessage: event.target.checked }))}
+                          className="h-4 w-4"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="mt-4 rounded-xl bg-rose-50 p-3 text-sm text-rose-700">Danh sách chặn (demo): spam_bot_01, quảng_cáo_02</div>
+
+                    <div className="mt-4 flex justify-end">
+                      <button
+                        onClick={savePrivacy}
+                        disabled={updatePrivacyMutation.isPending}
+                        className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                      >
+                        {updatePrivacyMutation.isPending ? "Đang lưu..." : "Lưu quyền riêng tư"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {settingsTab === "SESSIONS" ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between rounded-2xl bg-white p-4 shadow-sm">
+                    <div>
+                      <p className="text-lg font-semibold text-slate-800">Quản lý phiên đăng nhập</p>
+                      <p className="text-sm text-slate-500">Xem các thiết bị đã đăng nhập và đăng xuất toàn bộ khi cần.</p>
+                    </div>
+                    <button
+                      onClick={handleLogoutAllDevices}
+                      disabled={logoutAllDevicesMutation.isPending}
+                      className="rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                    >
+                      {logoutAllDevicesMutation.isPending ? "Đang xử lý..." : "Đăng xuất tất cả thiết bị"}
+                    </button>
+                  </div>
+
+                  <div className="space-y-3">
+                    {sessionsQuery.data?.map((session) => (
+                      <div key={session._id} className="rounded-2xl bg-white p-4 shadow-sm">
+                        <p className="font-semibold text-slate-800">{session.deviceName}</p>
+                        <p className="mt-1 text-sm text-slate-500">Thiết bị: {session.device}</p>
+                        <p className="text-sm text-slate-500">IP: {session.ipAddress || "-"}</p>
+                        <p className="text-sm text-slate-500">Thời gian: {new Date(session.createdAt).toLocaleString("vi-VN")}</p>
+                        <p className={`mt-1 text-sm font-medium ${session.isCurrent ? "text-emerald-600" : "text-slate-500"}`}>
+                          {session.isCurrent ? "Phiên hiện tại" : "Phiên khác"}
+                        </p>
+                      </div>
+                    ))}
+
+                    {!sessionsQuery.data?.length ? <div className="rounded-2xl bg-white p-4 text-sm text-slate-500 shadow-sm">Chưa có phiên đăng nhập nào.</div> : null}
                   </div>
                 </div>
               ) : null}

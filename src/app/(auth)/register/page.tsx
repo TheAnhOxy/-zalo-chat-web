@@ -1,47 +1,127 @@
-import Link from "next/link";
+"use client";
+
+import { useRouter } from "next/navigation";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+import { AuthShell } from "@/src/components/ui/auth-shell";
+import { FormError } from "@/src/components/ui/form-error";
+import { useToast } from "@/src/components/providers/toast-provider";
+import { useRegister } from "@/src/hooks/use-auth-actions";
+import { getErrorMessage } from "@/src/utils/error";
+import { registerSchema } from "@/src/utils/validators/auth";
+
+type RegisterValues = z.infer<typeof registerSchema>;
 
 export default function RegisterPage() {
+  const router = useRouter();
+  const { showToast } = useToast();
+  const registerMutation = useRegister();
+
+  const form = useForm<RegisterValues>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: {
+      fullName: "",
+      phone: "",
+      email: "",
+      password: "",
+      confirmPassword: "",
+    },
+  });
+
+  const onSubmit = form.handleSubmit(async (values) => {
+    try {
+      const response = await registerMutation.mutateAsync({
+        fullName: values.fullName,
+        phone: values.phone,
+        email: values.email,
+        password: values.password,
+      });
+      showToast("Đăng ký thành công, vui lòng nhập OTP", "success");
+      router.push(`/verify-otp?mode=register&sessionId=${response.sessionId}`);
+    } catch (error) {
+      showToast(getErrorMessage(error), "error");
+    }
+  });
+
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[linear-gradient(135deg,#e7f1ff,#f7fbff)] p-4">
-      <section className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-7 shadow-xl">
-        <h1 className="text-2xl font-bold text-slate-800">Tạo tài khoản mới</h1>
-        <p className="mt-2 text-sm text-slate-600">
-          Giao diện đăng ký đã sẵn sàng. Bạn chỉ cần nối API MongoDB theo schema hiện tại để hoàn tất luồng tạo tài khoản.
-        </p>
+    <AuthShell title="Đăng ký" subtitle="Sử dụng API /auth/register để tạo phiên OTP">
+      <form onSubmit={onSubmit} className="space-y-4">
+        <div>
+          <label htmlFor="fullName" className="text-sm font-medium">
+            Họ và tên
+          </label>
+          <input
+            id="fullName"
+            {...form.register("fullName")}
+            className="mt-1 h-11 w-full rounded-lg border border-white/30 bg-white/90 px-3 text-sm text-slate-900"
+            placeholder="Ví dụ: Nguyễn Văn A"
+          />
+          <FormError message={form.formState.errors.fullName?.message} />
+        </div>
 
-        <form className="mt-6 space-y-4">
+        <div>
+          <label htmlFor="phone" className="text-sm font-medium">
+            Số điện thoại
+          </label>
           <input
-            className="h-11 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-500"
-            placeholder="Họ và tên"
+            id="phone"
+            {...form.register("phone")}
+            className="mt-1 h-11 w-full rounded-lg border border-white/30 bg-white/90 px-3 text-sm text-slate-900"
+            placeholder="Ví dụ: 0912345678 hoặc 84912345678"
           />
+          <FormError message={form.formState.errors.phone?.message} />
+        </div>
+
+        <div>
+          <label htmlFor="email" className="text-sm font-medium">
+            Email
+          </label>
           <input
-            className="h-11 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-500"
-            placeholder="Số điện thoại"
+            id="email"
+            {...form.register("email")}
+            className="mt-1 h-11 w-full rounded-lg border border-white/30 bg-white/90 px-3 text-sm text-slate-900"
+            placeholder="name@company.com"
           />
+          <FormError message={form.formState.errors.email?.message} />
+        </div>
+
+        <div>
+          <label htmlFor="password" className="text-sm font-medium">
+            Mật khẩu
+          </label>
           <input
-            className="h-11 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-500"
-            placeholder="Email"
-          />
-          <input
-            className="h-11 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-500"
+            id="password"
             type="password"
-            placeholder="Mật khẩu"
+            {...form.register("password")}
+            className="mt-1 h-11 w-full rounded-lg border border-white/30 bg-white/90 px-3 text-sm text-slate-900"
+            placeholder="Tối thiểu 8 ký tự, gồm hoa/thường/số"
           />
-          <button
-            type="button"
-            className="h-11 w-full rounded-lg bg-[#0068ff] text-sm font-semibold text-white transition hover:bg-[#005ae0]"
-          >
-            Đăng ký
-          </button>
-        </form>
+          <FormError message={form.formState.errors.password?.message} />
+        </div>
 
-        <p className="mt-5 text-sm text-slate-600">
-          Đã có tài khoản?{" "}
-          <Link href="/login" className="font-semibold text-[#0068ff] underline underline-offset-4">
-            Đăng nhập
-          </Link>
-        </p>
-      </section>
-    </main>
+        <div>
+          <label htmlFor="confirmPassword" className="text-sm font-medium">
+            Xác nhận mật khẩu
+          </label>
+          <input
+            id="confirmPassword"
+            type="password"
+            {...form.register("confirmPassword")}
+            className="mt-1 h-11 w-full rounded-lg border border-white/30 bg-white/90 px-3 text-sm text-slate-900"
+            placeholder="Nhập lại mật khẩu"
+          />
+          <FormError message={form.formState.errors.confirmPassword?.message} />
+        </div>
+
+        <button
+          type="submit"
+          disabled={registerMutation.isPending}
+          className="h-11 w-full rounded-lg bg-blue-600 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60"
+        >
+          {registerMutation.isPending ? "Đang gửi..." : "Đăng ký"}
+        </button>
+      </form>
+    </AuthShell>
   );
 }

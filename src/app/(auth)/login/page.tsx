@@ -4,203 +4,349 @@ import Link from "next/link";
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Mail, Lock, Phone } from "lucide-react";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+import { ArrowRight, Eye, EyeOff, KeyRound, MessageCircle, ShieldCheck, Sparkles, Smartphone, Zap } from "lucide-react";
+import { FormError } from "@/src/components/ui/form-error";
+import { useToast } from "@/src/components/providers/toast-provider";
+import { useLogin } from "@/src/hooks/use-auth-actions";
+import { getErrorMessage } from "@/src/utils/error";
+import { loginSchema, requestPhoneOtpSchema } from "@/src/utils/validators/auth";
+import { clearPendingLogin, getPendingLogin, setPendingLogin } from "@/src/utils/storage";
+import { LoginOption, PendingLoginState } from "@/src/types/auth";
+import { authService } from "@/src/services/auth/auth.service";
 
-const FAKE_SESSION_KEY = "zalo_fake_session";
-const DEMO_PASSWORD = "123456";
-const DEMO_USER = {
-  _id: "demo-user-001",
-  fullName: "Demo User",
-  email: "demo@zalo.local",
-  phone: "0987654321",
-  avatar: "",
-};
+type LoginValues = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
   const router = useRouter();
-  const [identifier, setIdentifier] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const { showToast } = useToast();
+  const loginMutation = useLogin();
+  const [showPassword, setShowPassword] = useState(false);
+  const [loginStage, setLoginStage] = useState<"form" | "options">("form");
+  const [pendingLogin, setPendingLoginState] = useState<PendingLoginState | null>(null);
+  const [selectedOption, setSelectedOption] = useState<LoginOption>("quick");
+  const [optionLoading, setOptionLoading] = useState(false);
+  const [otpPhone, setOtpPhone] = useState("");
+  const [otpPhoneError, setOtpPhoneError] = useState<string | null>(null);
 
-  const isPhone = useMemo(() => /^\d{9,11}$/.test(identifier.trim()), [identifier]);
-  const isEmail = useMemo(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier.trim()), [identifier]);
+  const form = useForm<LoginValues>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: {
+      identifier: "",
+      password: "",
+    },
+  });
 
   useEffect(() => {
-    const session = localStorage.getItem(FAKE_SESSION_KEY);
+    const storedPending = getPendingLogin();
 
-    if (session) {
-      router.replace("/");
+    if (storedPending?.identifier && storedPending?.user?._id) {
+      setPendingLoginState(storedPending);
+      setLoginStage("options");
+      form.setValue("identifier", storedPending.identifier);
+      return;
     }
-  }, [router]);
 
-  const saveFakeSession = (loginBy: "email" | "phone" | "quick") => {
-    localStorage.setItem(
-      FAKE_SESSION_KEY,
-      JSON.stringify({
-        ...DEMO_USER,
+    clearPendingLogin();
+  }, [form]);
+
+  const introCards = useMemo(
+    () => [
+      {
+        icon: MessageCircle,
+        title: "Realtime Chat",
+        text: "Nhắn tin nhanh, mượt, không nhiễu",
+      },
+      {
+        icon: ShieldCheck,
+        title: "An toàn phiên",
+        text: "Giữ token và refresh an toàn",
+      },
+      {
+        icon: Zap,
+        title: "Tối ưu tốc độ",
+        text: "Giao diện nhẹ, phản hồi nhanh",
+      },
+    ],
+    []
+  );
+
+  const onSubmit = form.handleSubmit(async (values) => {
+    try {
+      const response = await loginMutation.mutateAsync({
+        ...values,
+        device: "web",
+        deviceName: "QuickChat Web",
+      });
+
+      if (!response?.user?._id) {
+        showToast("Backend login chưa trả về thông tin user hợp lệ", "error");
+        clearPendingLogin();
+        return;
+      }
+
+      showToast("Đăng nhập thành công", "success");
+      const loginBy = values.identifier.includes("@") ? "email" : "phone";
+      const pendingState: PendingLoginState = {
+        ...response,
+        identifier: values.identifier,
         loginBy,
-        loggedInAt: new Date().toISOString(),
-      })
-    );
-  };
+      };
 
-  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+      setPendingLogin(pendingState);
+      setPendingLoginState(pendingState);
+      setLoginStage("options");
+    } catch (error) {
+      showToast(getErrorMessage(error), "error");
+    }
+  });
 
-    if (!isPhone && !isEmail) {
-      setError("Vui lòng nhập đúng số điện thoại hoặc email.");
+  const finalizeQuickLogin = () => {
+    if (!pendingLogin) {
       return;
     }
 
-    if (password.length < 6) {
-      setError("Mật khẩu cần ít nhất 6 ký tự.");
+    clearPendingLogin();
+    loginMutation.reset();
+    showToast("Đăng nhập nhanh thành công", "success");
+    router.replace("/");
+  };
+
+  const handleOtpLogin = async () => {
+    if (!pendingLogin) {
       return;
     }
 
-    setError("");
-    saveFakeSession(isPhone ? "phone" : "email");
-    router.push("/");
+    const parsedPhone = requestPhoneOtpSchema.safeParse({ phone: otpPhone });
+    if (!parsedPhone.success) {
+      setOtpPhoneError(parsedPhone.error.issues[0]?.message || "Số điện thoại không hợp lệ");
+      return;
+    }
+
+    setOtpPhoneError(null);
+
+    try {
+      setOptionLoading(true);
+      const otpSession = await authService.requestPhoneLoginOtp({ phone: parsedPhone.data.phone });
+      showToast("Đã gửi OTP xác thực", "success");
+      router.push(`/verify-otp?mode=phone-login&sessionId=${otpSession.sessionId}`);
+    } catch (error) {
+      showToast(getErrorMessage(error), "error");
+    } finally {
+      setOptionLoading(false);
+    }
   };
 
-  const handleQuickLogin = () => {
-    setIdentifier(DEMO_USER.email);
-    setPassword(DEMO_PASSWORD);
-    setError("");
-    saveFakeSession("quick");
-    router.push("/");
+  const handleBackToForm = () => {
+    clearPendingLogin();
+    setPendingLoginState(null);
+    setLoginStage("form");
+    setSelectedOption("quick");
   };
 
   return (
-    <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden p-4 md:p-8">
-      <Image
-        src="/images/anhnen.jpg" // Ảnh mẫu tạm thời
-        alt="Sea background"
-        fill
-        quality={100}
-        priority
-        className="-z-20 object-cover"
-      />
-      <div className="absolute inset-0 -z-10 bg-slate-900/35" />
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden p-4 md:p-8">
+      <Image src="/images/anhnen.jpg" alt="QuickChat background" fill priority className="-z-20 object-cover" />
+      <div className="absolute inset-0 -z-10 bg-slate-950/60" />
 
-      <div className="absolute left-0 top-0 h-full w-full bg-[radial-gradient(circle_at_18%_30%,rgba(255,255,255,0.18),transparent_42%),radial-gradient(circle_at_78%_72%,rgba(59,130,246,0.28),transparent_45%)]" />
+      <div className="grid w-full max-w-6xl gap-6 rounded-3xl border border-white/20 bg-white/10 p-4 shadow-2xl backdrop-blur-md md:grid-cols-[1.2fr_1fr] md:p-8">
+        <section className="order-2 rounded-2xl border border-white/30 bg-white/15 p-6 text-white shadow-xl backdrop-blur-xl md:order-2 md:p-8">
+          {loginStage === "form" ? (
+            <>
+              <h2 className="text-3xl font-bold">Đăng nhập</h2>
+              <p className="mt-2 text-sm text-white/80">Sử dụng API thật /auth/login</p>
 
-      <div className="mx-auto grid w-full max-w-6xl gap-8 rounded-[2rem] border border-white/30 bg-white/5 p-4 shadow-[0_18px_55px_rgba(10,16,30,0.45)] backdrop-blur-sm md:grid-cols-[1fr_430px] md:p-8">
-        <div className="rounded-[1.5rem] p-6 text-white md:p-10">
-          <p className="mb-5 inline-flex items-center gap-2 text-lg font-semibold tracking-[0.2em] text-white/95">
-            TRAVEL
+              <form onSubmit={onSubmit} className="mt-6 space-y-4">
+                <div>
+                  <label htmlFor="identifier" className="text-sm font-medium">
+                    Email hoặc số điện thoại
+                  </label>
+                  <input
+                    id="identifier"
+                    {...form.register("identifier")}
+                    className="mt-1 h-11 w-full rounded-lg border border-white/35 bg-white/95 px-3 text-sm text-slate-900"
+                    placeholder="Nhập email hoặc số điện thoại"
+                  />
+                  <FormError message={form.formState.errors.identifier?.message} />
+                </div>
+
+                <div>
+                  <label htmlFor="password" className="text-sm font-medium">
+                    Mật khẩu
+                  </label>
+                  <div className="relative mt-1">
+                    <input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      {...form.register("password")}
+                      className="h-11 w-full rounded-lg border border-white/35 bg-white/95 px-3 pr-11 text-sm text-slate-900"
+                      placeholder="Nhập mật khẩu"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((prev) => !prev)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-600 transition hover:bg-slate-200"
+                    >
+                      {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                    </button>
+                  </div>
+                  <FormError message={form.formState.errors.password?.message} />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loginMutation.isPending}
+                  className="h-11 w-full rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
+                >
+                  {loginMutation.isPending ? "Đang đăng nhập..." : "Đăng nhập"}
+                </button>
+
+                <div className="flex justify-between text-sm text-white/90">
+                  <Link href="/register" className="underline underline-offset-4">
+                    Đăng ký tài khoản
+                  </Link>
+                  <Link href="/forgot-password" className="underline underline-offset-4">
+                    Quên mật khẩu
+                  </Link>
+                </div>
+              </form>
+            </>
+          ) : (
+            <div className="space-y-5">
+              <div>
+                <h2 className="text-3xl font-bold">Chọn cách đăng nhập</h2>
+                <p className="mt-2 text-sm text-white/80">
+                  Đăng nhập thành công. Chọn 1 trong 3 lựa chọn để vào ứng dụng.
+                </p>
+              </div>
+
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  onClick={finalizeQuickLogin}
+                  className={`flex w-full items-center justify-between rounded-2xl border px-4 py-4 text-left transition ${
+                    selectedOption === "quick"
+                      ? "border-cyan-300 bg-cyan-300/15"
+                      : "border-white/20 bg-white/10 hover:bg-white/15"
+                  }`}
+                  onMouseEnter={() => setSelectedOption("quick")}
+                >
+                  <div>
+                    <p className="font-semibold">Đăng nhập nhanh</p>
+                    <p className="text-xs text-white/75">Vào thẳng QuickChat bằng phiên hiện tại</p>
+                  </div>
+                  <ArrowRight className="size-4" />
+                </button>
+
+                <div
+                  className={`rounded-2xl border px-4 py-4 ${
+                    selectedOption === "otp"
+                      ? "border-cyan-300 bg-cyan-300/15"
+                      : "border-white/20 bg-white/10"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between text-left"
+                    onClick={() => setSelectedOption("otp")}
+                  >
+                    <div>
+                      <p className="font-semibold">Xác thực OTP</p>
+                      <p className="text-xs text-white/75">Nhập số điện thoại để nhận OTP đăng nhập</p>
+                    </div>
+                    <Smartphone className="size-4" />
+                  </button>
+
+                  {selectedOption === "otp" ? (
+                    <div className="mt-4 space-y-3">
+                      <input
+                        value={otpPhone}
+                        onChange={(event) => {
+                          setOtpPhone(event.target.value);
+                          if (otpPhoneError) {
+                            setOtpPhoneError(null);
+                          }
+                        }}
+                        className="h-11 w-full rounded-lg border border-white/35 bg-white/95 px-3 text-sm text-slate-900"
+                        placeholder="Nhập số điện thoại Việt Nam"
+                      />
+                      {otpPhoneError ? <FormError message={otpPhoneError} /> : null}
+                      <button
+                        type="button"
+                        onClick={handleOtpLogin}
+                        disabled={optionLoading}
+                        className="h-11 w-full rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
+                      >
+                        {optionLoading ? "Đang gửi OTP..." : "Gửi OTP và chuyển sang xác thực"}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedOption("2fa")}
+                  className="flex w-full items-center justify-between rounded-2xl border border-white/20 bg-white/10 px-4 py-4 text-left opacity-80"
+                >
+                  <div>
+                    <p className="font-semibold">Xác thực 2FA</p>
+                    <p className="text-xs text-white/75">Chưa triển khai ở backend hiện tại</p>
+                  </div>
+                  <KeyRound className="size-4" />
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleBackToForm}
+                className="text-sm text-cyan-100 underline underline-offset-4"
+              >
+                Quay lại form đăng nhập
+              </button>
+            </div>
+          )}
+        </section>
+
+        <section className="order-1 relative overflow-hidden rounded-2xl border border-cyan-300/25 bg-[linear-gradient(160deg,#0d2a47,#133d5e,#1b5f7a)] p-7 text-white md:order-1 md:p-10">
+          <div className="pointer-events-none absolute -right-14 -top-14 size-48 rounded-full bg-cyan-300/20 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-16 -left-8 size-52 rounded-full bg-blue-400/20 blur-3xl" />
+
+          <p className="inline-flex items-center gap-2 rounded-full border border-cyan-100/40 bg-white/10 px-3 py-1 text-xs uppercase tracking-[0.2em] text-cyan-100">
+            QuickChat
+            <Sparkles className="size-3 animate-pulse" />
           </p>
-          <h1 className="text-5xl font-black uppercase leading-[0.9] tracking-tight md:text-7xl">
-            Explore
+
+          <h1 className="mt-6 text-4xl font-extrabold leading-tight md:text-5xl">
+            Kết nối nhóm
             <br />
-            Horizons
+            Nhanh và bảo mật
           </h1>
-          <p className="mt-7 max-w-md text-xl font-medium text-white/90 md:text-2xl">
-            Where your dream destinations become reality.
+
+          <p className="mt-4 max-w-md text-base text-cyan-50/90 md:text-lg">
+            Không gian trò chuyện realtime cho đội của bạn với trải nghiệm mượt, rõ và hiện đại.
           </p>
-          <p className="mt-3 max-w-md text-base text-white/70 md:text-lg">
-            Đăng nhập để truy cập Zalo Web, trò chuyện với bạn bè và đồng bộ dữ liệu của bạn mọi lúc.
-          </p>
-        </div>
 
-        <div className="w-full rounded-[1.5rem] border border-white/30 bg-white/20 p-6 shadow-2xl backdrop-blur-xl md:p-8">
-          <form className="space-y-5" onSubmit={handleSubmit}>
-            <h2 className="text-center text-3xl font-bold text-white">Đăng nhập</h2>
+          <div className="mt-8 grid gap-3 sm:grid-cols-3">
+            {introCards.map((card, index) => {
+              const Icon = card.icon;
 
-            <div className="space-y-2">
-              <label htmlFor="identifier" className="text-sm font-medium text-white/90">
-                Email hoặc số điện thoại
-              </label>
-              <div className="relative">
-                <input
-                  id="identifier"
-                  name="identifier"
-                  type="text"
-                  value={identifier}
-                  onChange={(event) => setIdentifier(event.target.value)}
-                  placeholder="Nhập email hoặc số điện thoại"
-                  className="h-12 w-full rounded-lg border border-white/30 bg-white/85 pl-11 pr-4 text-sm text-slate-700 placeholder:text-slate-400 outline-none transition focus:border-blue-500"
-                />
-                {isPhone ? (
-                  <Phone className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" />
-                ) : (
-                  <Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" />
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label htmlFor="password" className="text-sm font-medium text-white/90">
-                  Mật khẩu
-                </label>
-                <Link href="/forgot-password" className="text-sm text-white underline-offset-4 hover:underline">
-                  Quên mật khẩu?
-                </Link>
-              </div>
-              <div className="relative">
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="************"
-                  className="h-12 w-full rounded-lg border border-white/30 bg-white/85 pl-11 pr-4 text-sm text-slate-700 placeholder:text-slate-400 outline-none transition focus:border-blue-500"
-                />
-                <Lock className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-500" />
-              </div>
-            </div>
-
-            {error ? (
-              <p className="rounded-lg bg-red-500/20 px-3 py-2 text-sm text-red-100">{error}</p>
-            ) : null}
-
-            <button
-              type="submit"
-              className="h-12 w-full rounded-lg bg-[#1988ff] text-sm font-semibold text-white transition hover:bg-[#0074f0]"
-            >
-              SIGN IN
-            </button>
-
-            <button
-              type="button"
-              onClick={handleQuickLogin}
-              className="h-11 w-full rounded-lg border border-white/60 bg-white/15 text-sm font-semibold text-white transition hover:bg-white/25"
-            >
-              Đăng nhập nhanh với tài khoản demo
-            </button>
-
-            <p className="rounded-lg bg-black/20 px-3 py-2 text-xs text-white/90">
-              Demo: demo@zalo.local hoặc 0987654321 - Mật khẩu: 123456
-            </p>
-
-            <div className="flex items-center gap-3">
-              <div className="h-px flex-1 bg-white/40" />
-              <span className="text-sm text-white">or</span>
-              <div className="h-px flex-1 bg-white/40" />
-            </div>
-
-            <button
-              type="button"
-              className="flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-white text-sm font-medium text-slate-700 transition hover:bg-slate-100"
-            >
-              <span className="text-lg">G</span>
-              Sign in with Google
-            </button>
-
-            <p className="text-center text-sm text-white/90">
-              Bạn chưa có tài khoản?{" "}
-              <Link href="/register" className="font-semibold underline underline-offset-4">
-                Tạo tài khoản
-              </Link>
-            </p>
-          </form>
-        </div>
+              return (
+                <div
+                  key={card.title}
+                  className="animate-fadeIn rounded-xl border border-white/15 bg-white/10 p-3"
+                  style={{ animationDelay: `${index * 120}ms` }}
+                >
+                  <Icon className="size-5 text-cyan-200" />
+                  <p className="mt-2 text-sm font-medium">{card.title}</p>
+                  <p className="mt-1 text-xs text-cyan-50/75">{card.text}</p>
+                </div>
+              );
+            })}
+          </div>
+        </section>
       </div>
-
-      <footer className="absolute bottom-5 text-center text-xs text-white/80">
-        Zalo Web Mock UI - Đăng nhập với email hoặc số điện thoại
-      </footer>
     </div>
   );
 }
