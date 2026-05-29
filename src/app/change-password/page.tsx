@@ -37,6 +37,8 @@ export default function ChangePasswordPage() {
   }
 
   const onSubmit = form.handleSubmit(async (values) => {
+    if (!auth.user) return;
+
     if (values.newPassword !== values.confirmPassword) {
       showToast("Xác nhận mật khẩu mới không khớp", "error");
       return;

@@ -20,8 +20,16 @@ export function useLogin() {
   return useMutation({
     mutationFn: (payload: LoginRequest) => authService.login(payload),
     onSuccess: (data) => {
-      auth.loginWithAuthResponse(data);
+      if (!("requiresEmailConfirmation" in data)) {
+        auth.loginWithAuthResponse(data);
+      }
     },
+  });
+}
+
+export function useCheckLoginChallengeStatus() {
+  return useMutation({
+    mutationFn: (payload: { challengeId: string }) => authService.checkLoginChallengeStatus(payload),
   });
 }
 
