@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { authService } from "@/src/services/auth/auth.service";
+import { socketService } from "@/src/services/socket/socket.service";
 import { AuthResponse, AuthUser } from "@/src/types/auth";
 import {
   clearStoredTokens,
@@ -39,6 +40,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     setIsInitialized(true);
   }, []);
+
+  useEffect(() => {
+    if (user && user._id) {
+      socketService.connect(user._id);
+    } else {
+      socketService.disconnect();
+    }
+    return () => {
+      socketService.disconnect();
+    };
+  }, [user]);
 
   const loginWithAuthResponse = useCallback((payload: AuthResponse) => {
     setStoredTokens({

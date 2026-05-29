@@ -2,27 +2,61 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { ArrowRight, Eye, EyeOff, KeyRound, MessageCircle, ShieldCheck, Sparkles, Smartphone, Zap } from "lucide-react";
+import { Eye, EyeOff, MessageCircle, ShieldCheck, Sparkles, Smartphone, Zap, KeyRound, ArrowRight, ShieldAlert } from "lucide-react";
 import { FormError } from "@/src/components/ui/form-error";
 import { useToast } from "@/src/components/providers/toast-provider";
 import { useLogin } from "@/src/hooks/use-auth-actions";
+import { useAuth } from "@/src/components/providers/auth-provider";
 import { getErrorMessage } from "@/src/utils/error";
 import { loginSchema, requestPhoneOtpSchema } from "@/src/utils/validators/auth";
-import { clearPendingLogin, getPendingLogin, setPendingLogin } from "@/src/utils/storage";
-import { LoginOption, PendingLoginState } from "@/src/types/auth";
 import { authService } from "@/src/services/auth/auth.service";
+import { clearPendingLogin, getPendingLogin, setPendingLogin } from "@/src/utils/storage";
+import { LoginOption, PendingLoginState, AuthResponse } from "@/src/types/auth";
 
 type LoginValues = z.infer<typeof loginSchema>;
 
-export default function LoginPage() {
+function getDeviceFingerprint(): string {
+  if (typeof window === "undefined") return "";
+  let fp = localStorage.getItem("device_fingerprint");
+  if (!fp) {
+    fp = "fp_" + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    localStorage.setItem("device_fingerprint", fp);
+  }
+  return fp;
+}
+
+function getDeviceName(): string {
+  if (typeof window === "undefined") return "Chrome Windows";
+  const userAgent = navigator.userAgent;
+  if (userAgent.includes("Chrome")) return "Chrome Windows";
+  if (userAgent.includes("Firefox")) return "Firefox Windows";
+  if (userAgent.includes("Safari")) return "Safari macOS";
+  return "Web Browser";
+}
+
+function LoginInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { showToast } = useToast();
   const loginMutation = useLogin();
+  const auth = useAuth();
+
+  const reason = searchParams.get("reason");
+  const alertMessage = (() => {
+    if (reason === "logged_out_all_devices") {
+      return "Tài khoản của bạn đã được đăng xuất khỏi tất cả các thiết bị khác.";
+    }
+    if (reason === "session_expired") {
+      return "Phiên đăng nhập của bạn đã hết hạn hoặc đã bị hủy. Vui lòng đăng nhập lại.";
+    }
+    return null;
+  })();
+  
   const [showPassword, setShowPassword] = useState(false);
   const [loginStage, setLoginStage] = useState<"form" | "options">("form");
   const [pendingLogin, setPendingLoginState] = useState<PendingLoginState | null>(null);
@@ -78,19 +112,30 @@ export default function LoginPage() {
       const response = await loginMutation.mutateAsync({
         ...values,
         device: "web",
-        deviceName: "QuickChat Web",
+        deviceName: getDeviceName(),
+        deviceFingerprint: getDeviceFingerprint(),
       });
 
-      if (!response?.user?._id) {
-        showToast("Backend login chưa trả về thông tin user hợp lệ", "error");
-        clearPendingLogin();
+      if ("requiresEmailConfirmation" in response && response.requiresEmailConfirmation) {
+        showToast("Đăng nhập từ thiết bị mới. Vui lòng xác thực qua Email.", "info");
+        const params = new URLSearchParams({
+          challengeId: response.challengeId || "",
+          email: response.email || "",
+          challengeExpiredAt: response.challengeExpiredAt || "",
+          reason: response.reason || "new_device",
+        });
+        router.push(`/login-challenge?${params.toString()}`);
         return;
       }
 
-      showToast("Đăng nhập thành công", "success");
+      showToast("Đăng nhập mật khẩu thành công", "success");
+
+      const authData = response as AuthResponse;
       const loginBy = values.identifier.includes("@") ? "email" : "phone";
       const pendingState: PendingLoginState = {
-        ...response,
+        user: authData.user,
+        accessToken: authData.accessToken,
+        refreshToken: authData.refreshToken,
         identifier: values.identifier,
         loginBy,
       };
@@ -108,13 +153,18 @@ export default function LoginPage() {
       return;
     }
 
+    auth.loginWithAuthResponse({
+      user: pendingLogin.user,
+      accessToken: pendingLogin.accessToken,
+      refreshToken: pendingLogin.refreshToken,
+    });
+
     clearPendingLogin();
-    loginMutation.reset();
     showToast("Đăng nhập nhanh thành công", "success");
     router.replace("/");
   };
 
-  const handleOtpLogin = async () => {
+  const handlePhoneOtpRequest = async () => {
     if (!pendingLogin) {
       return;
     }
@@ -129,8 +179,9 @@ export default function LoginPage() {
 
     try {
       setOptionLoading(true);
+      // Calls request phone OTP with ONLY phone as required
       const otpSession = await authService.requestPhoneLoginOtp({ phone: parsedPhone.data.phone });
-      showToast("Đã gửi OTP xác thực", "success");
+      showToast("Đã gửi mã OTP đăng nhập về email của tài khoản", "success");
       router.push(`/verify-otp?mode=phone-login&sessionId=${otpSession.sessionId}`);
     } catch (error) {
       showToast(getErrorMessage(error), "error");
@@ -156,7 +207,14 @@ export default function LoginPage() {
           {loginStage === "form" ? (
             <>
               <h2 className="text-3xl font-bold">Đăng nhập</h2>
-              <p className="mt-2 text-sm text-white/80">Sử dụng API thật /auth/login</p>
+              <p className="mt-2 text-sm text-white/80">Sử dụng Email/Số điện thoại và Mật khẩu</p>
+
+              {alertMessage && (
+                <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3.5 text-xs text-rose-200 animate-fadeIn">
+                  <ShieldAlert className="size-4 shrink-0 text-rose-400 mt-0.5" />
+                  <span className="leading-normal font-medium">{alertMessage}</span>
+                </div>
+              )}
 
               <form onSubmit={onSubmit} className="mt-6 space-y-4">
                 <div>
@@ -166,7 +224,7 @@ export default function LoginPage() {
                   <input
                     id="identifier"
                     {...form.register("identifier")}
-                    className="mt-1 h-11 w-full rounded-lg border border-white/35 bg-white/95 px-3 text-sm text-slate-900"
+                    className="mt-1 h-11 w-full rounded-lg border border-white/35 bg-white/95 px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-cyan-500"
                     placeholder="Nhập email hoặc số điện thoại"
                   />
                   <FormError message={form.formState.errors.identifier?.message} />
@@ -181,7 +239,7 @@ export default function LoginPage() {
                       id="password"
                       type={showPassword ? "text" : "password"}
                       {...form.register("password")}
-                      className="h-11 w-full rounded-lg border border-white/35 bg-white/95 px-3 pr-11 text-sm text-slate-900"
+                      className="h-11 w-full rounded-lg border border-white/35 bg-white/95 px-3 pr-11 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-cyan-500"
                       placeholder="Nhập mật khẩu"
                     />
                     <button
@@ -218,7 +276,7 @@ export default function LoginPage() {
               <div>
                 <h2 className="text-3xl font-bold">Chọn cách đăng nhập</h2>
                 <p className="mt-2 text-sm text-white/80">
-                  Đăng nhập thành công. Chọn 1 trong 3 lựa chọn để vào ứng dụng.
+                  Đăng nhập thành công. Chọn 1 trong các lựa chọn để vào ứng dụng.
                 </p>
               </div>
 
@@ -269,17 +327,17 @@ export default function LoginPage() {
                             setOtpPhoneError(null);
                           }
                         }}
-                        className="h-11 w-full rounded-lg border border-white/35 bg-white/95 px-3 text-sm text-slate-900"
+                        className="h-11 w-full rounded-lg border border-white/35 bg-white/95 px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-cyan-500"
                         placeholder="Nhập số điện thoại Việt Nam"
                       />
                       {otpPhoneError ? <FormError message={otpPhoneError} /> : null}
                       <button
                         type="button"
-                        onClick={handleOtpLogin}
+                        onClick={handlePhoneOtpRequest}
                         disabled={optionLoading}
                         className="h-11 w-full rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
                       >
-                        {optionLoading ? "Đang gửi OTP..." : "Gửi OTP và chuyển sang xác thực"}
+                        {optionLoading ? "Đang gửi OTP..." : "Nhận mã OTP qua Email"}
                       </button>
                     </div>
                   ) : null}
@@ -348,5 +406,22 @@ export default function LoginPage() {
         </section>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
+          <div className="text-center space-y-4">
+            <div className="h-10 w-10 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto" />
+            <p className="text-sm text-white/60">Đang tải...</p>
+          </div>
+        </div>
+      }
+    >
+      <LoginInner />
+    </Suspense>
   );
 }
