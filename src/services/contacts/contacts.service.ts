@@ -8,6 +8,7 @@ export interface GroupItem {
   avatar?: string;
   memberCount: number;
   updatedAt: string;
+  members?: { userId: string; role: string }[];
 }
 
 // NOTE: Backend endpoints for contacts/groups are not specified in the request.
@@ -18,6 +19,96 @@ export const contactsService = {
   },
 
   getGroups(userId: string) {
-    return apiClient.get<GroupItem[]>(`/groups/${userId}`).then((res) => res.data);
+    return apiClient.get<any[]>(`/conversations/member/${userId}`).then((res) => {
+      const groups = res.data.filter((c: any) => c.type === "GROUP");
+      return groups as GroupItem[];
+    });
   },
+
+  async getReceivedRequests(userId: string) {
+    // According to flutter app, we get friendships and filter by PENDING and addresseeId == userId
+    const res = await apiClient.get<any[]>(`/friendships/user/${userId}`);
+    const pending = res.data.filter((f) => f.status === "PENDING" && f.addresseeId === userId);
+    
+    // Fetch users for each request
+    const requests = await Promise.all(
+      pending.map(async (f) => {
+        try {
+          const userRes = await apiClient.get<IUser>(`/users/${f.requesterId}`);
+          return {
+            id: f._id || f.id,
+            user: userRes.data,
+            createdAt: f.createdAt,
+          };
+        } catch (e) {
+          return null;
+        }
+      })
+    );
+    return requests.filter(Boolean) as { id: string; user: IUser; createdAt: string }[];
+  },
+
+  async getSentRequests(userId: string) {
+    const res = await apiClient.get<any[]>(`/friendships/user/${userId}`);
+    const pending = res.data.filter((f) => f.status === "PENDING" && f.requesterId === userId);
+    
+    const requests = await Promise.all(
+      pending.map(async (f) => {
+        try {
+          const userRes = await apiClient.get<IUser>(`/users/${f.addresseeId}`);
+          return {
+            id: f._id || f.id,
+            user: userRes.data,
+            createdAt: f.createdAt,
+          };
+        } catch (e) {
+          return null;
+        }
+      })
+    );
+    return requests.filter(Boolean) as { id: string; user: IUser; createdAt: string }[];
+  },
+
+  acceptFriendRequest(friendshipId: string) {
+    return apiClient.patch(`/friendships/${friendshipId}`, { status: "ACCEPTED" });
+  },
+
+  rejectFriendRequest(friendshipId: string) {
+    return apiClient.delete(`/friendships/${friendshipId}`);
+  },
+
+  searchByPhone(phone: string) {
+    const normalized = phone.trim().replace(/\s+/g, "");
+    return apiClient.get<IUser>(`/users/phone/${normalized}`).then(res => res.data).catch(() => null);
+  },
+
+  sendFriendRequest(requesterId: string, receiverId: string, message?: string) {
+    return apiClient.post(`/friendships`, { requesterId, addresseeId: receiverId, message });
+  },
+
+  createGroup(name: string, memberIds: string[], creatorId: string, avatar?: string) {
+    const members = memberIds.map((id) => ({
+      userId: id,
+      role: id === creatorId ? "ADMIN" : "MEMBER",
+    }));
+
+    const payload: any = {
+      type: "GROUP",
+      name,
+      members,
+    };
+    if (avatar) payload.avatar = avatar;
+
+    return apiClient.post(`/conversations`, payload).then(res => res.data);
+  },
+
+  async uploadGroupAvatar(file: File): Promise<string> {
+    const formData = new FormData();
+    formData.append("file", file);
+    // apiClient might override Content-Type to application/json, so we use fetch or override it
+    const res = await apiClient.post<any>("/conversations/avatar/upload", formData, {
+      headers: { "Content-Type": "multipart/form-data" }
+    });
+    return res.data.fileUrl || res.data.data?.fileUrl;
+  }
 };

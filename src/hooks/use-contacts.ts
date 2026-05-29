@@ -18,3 +18,19 @@ export function useGroups(userId?: string) {
     enabled: Boolean(userId),
   });
 }
+
+export function useReceivedRequests(userId?: string) {
+  return useQuery({
+    queryKey: ["friend-requests", "received", userId],
+    queryFn: () => contactsService.getReceivedRequests(userId as string),
+    enabled: Boolean(userId),
+  });
+}
+
+export function useSentRequests(userId?: string) {
+  return useQuery({
+    queryKey: ["friend-requests", "sent", userId],
+    queryFn: () => contactsService.getSentRequests(userId as string),
+    enabled: Boolean(userId),
+  });
+}
