@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
@@ -14,19 +15,16 @@ import {
   KeyRound,
   LogOut,
   MessageSquare,
-  MoreHorizontal,
-  Phone,
   Search,
-  Send,
   Settings,
   ShieldCheck,
   Sparkles,
   UserRoundPen,
   Users,
-  Video,
   X,
 } from "lucide-react";
 import { useAuthGuard } from "@/src/hooks/use-auth-guard";
+import { ChatWindow } from "@/src/components/chat/ChatWindow";
 import {
   useProfile,
   useUpdatePrivacy,
@@ -37,7 +35,11 @@ import {
 } from "@/src/hooks/use-user";
 import { PageLoader } from "@/src/components/ui/page-state";
 import { useToast } from "@/src/components/providers/toast-provider";
+import { conversationsApi } from "@/src/services/api/conversations";
+import { userService } from "@/src/services/user/user.service";
+import { formatMessageTime, formatLastMessagePreview } from "@/src/lib/messages";
 import { getErrorMessage } from "@/src/utils/error";
+import { IConversation } from "@/src/types/conversation";
 import { IUser, PrivacyStatus } from "@/src/types/user";
 import { useChangePassword, useLogoutAllDevices, useSessions } from "@/src/hooks/use-auth-actions";
 import { strongPasswordRegex } from "@/src/utils/validators/auth";
@@ -46,92 +48,96 @@ import axios from "axios";
 type ReadFilter = "ALL" | "UNREAD" | "READ";
 type SettingsTab = "GENERAL" | "SECURITY" | "PRIVACY" | "SESSIONS";
 
-type Conversation = {
+type ConversationCard = {
   id: string;
   name: string;
+  avatar?: string;
+  otherId?: string;
   subtitle: string;
   lastMessage: string;
   time: string;
+  sortTimestamp: number;
   unreadCount: number;
   online: boolean;
   avatarColor: string;
-  messages: Array<{
-    id: string;
-    sender: "me" | "them" | "system";
-    text: string;
-    time: string;
-  }>;
 };
 
-const conversationsSeed: Conversation[] = [
-  {
-    id: "c1",
-    name: "Nhóm Sản phẩm A1",
-    subtitle: "6 thành viên",
-    lastMessage: "Mình vừa hoàn tất bản giao diện mới cho desktop.",
-    time: "10:24",
-    unreadCount: 3,
-    online: true,
-    avatarColor: "from-emerald-400 to-teal-600",
-    messages: [
-      { id: "m1", sender: "system", text: "Hôm nay ưu tiên chốt màn hình cài đặt và hồ sơ.", time: "09:10" },
-      { id: "m2", sender: "them", text: "Mình vừa hoàn tất bản giao diện mới cho desktop.", time: "10:24" },
-    ],
-  },
-  {
-    id: "c2",
-    name: "An Nghiệp vụ",
-    subtitle: "Đang hoạt động",
-    lastMessage: "Lọc Đã đọc/Chưa đọc nhìn ổn rồi nhé.",
-    time: "09:42",
-    unreadCount: 0,
-    online: true,
-    avatarColor: "from-orange-400 to-amber-600",
-    messages: [
-      { id: "m1", sender: "them", text: "Lọc Đã đọc/Chưa đọc nhìn ổn rồi nhé.", time: "09:42" },
-      { id: "m2", sender: "me", text: "Ok, mình giữ đúng layout để team dễ dùng.", time: "09:44" },
-    ],
-  },
-  {
-    id: "c3",
-    name: "Thu Kiểm thử",
-    subtitle: "Đã xem 3 phút trước",
-    lastMessage: "Bản build mới mượt hơn rõ rệt.",
-    time: "08:56",
-    unreadCount: 1,
-    online: false,
-    avatarColor: "from-cyan-400 to-sky-600",
-    messages: [
-      { id: "m1", sender: "me", text: "Bạn test lại luồng đăng nhập chưa?", time: "08:51" },
-      { id: "m2", sender: "them", text: "Bản build mới mượt hơn rõ rệt.", time: "08:56" },
-    ],
-  },
-  {
-    id: "c4",
-    name: "Cộng đồng Thiết kế",
-    subtitle: "42 thành viên",
-    lastMessage: "Tone màu này đúng signature của nhóm luôn.",
-    time: "Hôm qua",
-    unreadCount: 0,
-    online: false,
-    avatarColor: "from-fuchsia-400 to-pink-600",
-    messages: [{ id: "m1", sender: "them", text: "Tone màu này đúng signature của nhóm luôn.", time: "Hôm qua" }],
-  },
-  {
-    id: "c5",
-    name: "Minh Vận hành",
-    subtitle: "Đang bận",
-    lastMessage: "Đã cấu hình monitor cho server chat.",
-    time: "Thứ 2",
-    unreadCount: 2,
-    online: true,
-    avatarColor: "from-indigo-400 to-blue-700",
-    messages: [
-      { id: "m1", sender: "them", text: "Đã cấu hình monitor cho server chat.", time: "Thứ 2" },
-      { id: "m2", sender: "me", text: "Tuyệt vời, mình sẽ kiểm tra logs ngay.", time: "Thứ 2" },
-    ],
-  },
+const avatarGradients = [
+  "from-emerald-400 to-teal-600",
+  "from-orange-400 to-amber-600",
+  "from-cyan-400 to-sky-600",
+  "from-fuchsia-400 to-pink-600",
+  "from-indigo-400 to-blue-700",
+  "from-rose-400 to-red-600",
 ];
+
+function hashString(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(index);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
+function sameDay(left: Date, right: Date) {
+  return left.getFullYear() === right.getFullYear() && left.getMonth() === right.getMonth() && left.getDate() === right.getDate();
+}
+
+function formatConversationTime(value: string | Date) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+
+  if (sameDay(date, today)) return formatMessageTime(date);
+  if (sameDay(date, yesterday)) return "Hôm qua";
+  return date.toLocaleDateString("vi-VN", { weekday: "short" });
+}
+
+function getConversationAvatarColor(conversationId: string) {
+  return avatarGradients[hashString(conversationId) % avatarGradients.length];
+}
+
+function getOtherParticipant(conversation: IConversation, currentUserId: string) {
+  return conversation.participants.find((participant) => participant.userId !== currentUserId) ?? conversation.participants[0] ?? null;
+}
+
+function buildConversationCard(conversation: IConversation, currentUserId: string): ConversationCard {
+  const otherParticipant = getOtherParticipant(conversation, currentUserId);
+  const isGroup = conversation.type === "GROUP";
+  const lastMessage = conversation.lastMessage
+    ? formatLastMessagePreview(conversation.lastMessage.content, {
+        type: conversation.lastMessage.type,
+        senderId: conversation.lastMessage.senderId,
+        currentUserId,
+      })
+    : "Chưa có tin nhắn";
+  const timeSource = conversation.lastMessage?.createdAt ?? conversation.updatedAt;
+  const sortTimestamp = new Date(timeSource).getTime();
+
+  return {
+    id: conversation._id,
+    name: isGroup ? (conversation.name || "Nhóm trò chuyện") : (otherParticipant?.fullName || ""),
+    avatar: isGroup ? conversation.avatar : otherParticipant?.avatar,
+    otherId: otherParticipant?.userId,
+    subtitle: isGroup
+      ? `${conversation.participants.length} thành viên`
+      : otherParticipant?.isOnline
+        ? "Đang hoạt động"
+        : otherParticipant?.lastSeen
+          ? "Hoạt động gần đây"
+          : "Đang hoạt động",
+    lastMessage,
+    time: formatConversationTime(timeSource),
+    sortTimestamp: Number.isNaN(sortTimestamp) ? 0 : sortTimestamp,
+    unreadCount: conversation.unreadCount,
+    online: isGroup ? false : Boolean(otherParticipant?.isOnline),
+    avatarColor: getConversationAvatarColor(conversation._id),
+  };
+}
 
 export default function HomePage() {
   const auth = useAuthGuard();
@@ -182,6 +188,46 @@ export default function HomePage() {
   const coverInputRef = useRef<HTMLInputElement | null>(null);
 
   const profile = profileQuery.data;
+  const currentUserId = auth.user?._id;
+
+  const conversationsQuery = useQuery({
+    queryKey: ["conversations", currentUserId],
+    queryFn: () => conversationsApi.listForUser(currentUserId!),
+    enabled: Boolean(auth.isInitialized && currentUserId),
+    staleTime: 30_000,
+  });
+
+  const conversationCards = useMemo(() => {
+    const list = conversationsQuery.data ?? [];
+    return list
+      .map((conversation) => buildConversationCard(conversation, currentUserId ?? ""))
+      .sort((left, right) => {
+        if (left.unreadCount !== right.unreadCount) return right.unreadCount - left.unreadCount;
+        return right.sortTimestamp - left.sortTimestamp;
+      });
+  }, [conversationsQuery.data, currentUserId]);
+
+  const [userCache, setUserCache] = useState<Record<string, { fullName?: string; avatar?: string }>>({});
+
+  useEffect(() => {
+    // Fetch missing display names for participants
+    const idsToLoad = new Set<string>();
+    for (const card of conversationCards) {
+      if ((!card.name || !card.avatar) && card.otherId && !userCache[card.otherId]) idsToLoad.add(card.otherId);
+    }
+    if (!idsToLoad.size) return;
+
+    for (const id of idsToLoad) {
+      userService
+        .getProfile(id)
+        .then((u) => {
+          setUserCache((prev) => ({ ...prev, [id]: { fullName: u?.fullName, avatar: u?.avatar } }));
+        })
+        .catch(() => {
+          // ignore
+        });
+    }
+  }, [conversationCards, userCache]);
 
   useEffect(() => {
     if (!profile) {
@@ -205,8 +251,25 @@ export default function HomePage() {
     setTwoFactorEnabled(Boolean(profile.settings?.twoFactorAuth));
   }, [profile]);
 
+  useEffect(() => {
+    if (conversationCards.length === 0) {
+      setActiveConversationId(null);
+      return;
+    }
+
+    if (!activeConversationId) {
+      setActiveConversationId(conversationCards[0].id);
+      return;
+    }
+
+    const stillExists = conversationCards.some((item) => item.id === activeConversationId);
+    if (!stillExists) {
+      setActiveConversationId(null);
+    }
+  }, [activeConversationId, conversationCards]);
+
   const filteredConversations = useMemo(() => {
-    return conversationsSeed.filter((item) => {
+    return conversationCards.filter((item) => {
       const keyword = `${item.name} ${item.lastMessage}`.toLowerCase();
       const matchesSearch = keyword.includes(search.toLowerCase().trim());
 
@@ -224,21 +287,10 @@ export default function HomePage() {
 
       return true;
     });
-  }, [readFilter, search]);
-
-  useEffect(() => {
-    if (!activeConversationId) {
-      return;
-    }
-
-    const stillExists = filteredConversations.some((item) => item.id === activeConversationId);
-    if (!stillExists) {
-      setActiveConversationId(null);
-    }
-  }, [activeConversationId, filteredConversations]);
+  }, [conversationCards, readFilter, search]);
 
   const activeConversation = activeConversationId
-    ? filteredConversations.find((item) => item.id === activeConversationId) || null
+    ? filteredConversations.find((item) => item.id === activeConversationId) || conversationCards.find((item) => item.id === activeConversationId) || null
     : null;
 
   const userName = profile?.fullName || auth.user?.fullName || "QuickChat User";
@@ -492,6 +544,10 @@ export default function HomePage() {
           </div>
 
           <div className="h-[calc(100vh-142px)] overflow-y-auto">
+            {conversationsQuery.isLoading && conversationCards.length === 0 ? (
+              <div className="px-5 py-8 text-sm text-slate-500">Đang tải hội thoại...</div>
+            ) : null}
+
             {filteredConversations.map((item) => (
               <button
                 key={item.id}
@@ -499,11 +555,24 @@ export default function HomePage() {
                 className={`grid w-full grid-cols-[52px_1fr_auto] gap-3 border-b border-slate-100 px-3 py-3 text-left transition hover:bg-white ${activeConversationId === item.id ? "bg-white" : "bg-transparent"
                   }`}
               >
-                <div className={`relative mt-0.5 h-12 w-12 rounded-full bg-gradient-to-br ${item.avatarColor}`}>
+                <div className={`relative mt-0.5 h-12 w-12 rounded-full overflow-hidden bg-gradient-to-br ${item.avatarColor}`}>
+                  {item.avatar || (item.otherId ? userCache[item.otherId]?.avatar : undefined) ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={item.avatar || (item.otherId ? userCache[item.otherId]?.avatar : undefined)}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    null
+                  )}
                   {item.online ? <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-emerald-500" /> : null}
                 </div>
                 <div className="min-w-0">
-                  <p className="truncate font-semibold text-slate-800">{item.name}</p>
+                  {(() => {
+                    const display = item.name || (item.otherId ? userCache[item.otherId]?.fullName : undefined) || item.otherId || "Cuộc trò chuyện";
+                    return <p className="truncate font-semibold text-slate-800">{display}</p>;
+                  })()}
                   <p className="truncate text-sm text-slate-500">{item.lastMessage}</p>
                 </div>
                 <div className="flex flex-col items-end gap-2">
@@ -521,55 +590,11 @@ export default function HomePage() {
           </div>
         </section>
 
-        <section className="grid h-full grid-rows-[64px_1fr_62px] bg-white">
-          <header className="flex items-center justify-between border-b border-slate-200 px-4">
-            {activeConversation ? (
-              <>
-                <div>
-                  <p className="font-semibold text-slate-800">{activeConversation.name}</p>
-                  <p className="text-xs text-slate-500">{activeConversation.subtitle}</p>
-                </div>
-                <div className="flex items-center gap-3 text-slate-500">
-                  <Phone size={18} className="cursor-pointer" />
-                  <Video size={18} className="cursor-pointer" />
-                  <Search size={18} className="cursor-pointer" />
-                  <MoreHorizontal size={18} className="cursor-pointer" />
-                </div>
-              </>
-            ) : (
-              <div>
-                <p className="font-semibold text-slate-800">QuickChat</p>
-                <p className="text-xs text-slate-500">Chọn một hội thoại để bắt đầu trò chuyện</p>
-              </div>
-            )}
-          </header>
-
-          <div className="overflow-y-auto bg-slate-100/70 px-5 py-4">
-            {activeConversation ? (
-              <div className="space-y-3">
-                {activeConversation.messages.map((message) => {
-                  if (message.sender === "system") {
-                    return (
-                      <div key={message.id} className="mx-auto max-w-xl rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
-                        {message.text}
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div key={message.id} className={`flex ${message.sender === "me" ? "justify-end" : "justify-start"}`}>
-                      <div
-                        className={`max-w-[70%] rounded-2xl px-4 py-2 text-sm ${message.sender === "me" ? "bg-emerald-600 text-white" : "border border-slate-200 bg-white text-slate-700"
-                          }`}
-                      >
-                        <p>{message.text}</p>
-                        <p className={`mt-1 text-[11px] ${message.sender === "me" ? "text-emerald-100" : "text-slate-400"}`}>{message.time}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
+        <section className="relative h-full min-h-0 bg-white">
+          {activeConversationId ? (
+            <ChatWindow conversationId={activeConversationId} />
+          ) : (
+            <div className="flex h-full items-center justify-center bg-slate-100/70 px-5">
               <div className="mx-auto mt-8 max-w-2xl">
                 <div className="rounded-3xl border border-emerald-200 bg-gradient-to-r from-emerald-100 to-amber-100 p-6 text-center shadow-sm">
                   <p className="text-2xl font-bold text-emerald-900">Chào mừng đến với QuickChat PC!</p>
@@ -600,32 +625,15 @@ export default function HomePage() {
                   </div>
                 </div>
               </div>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2 border-t border-slate-200 px-4">
-            <button className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100" disabled={!activeConversation}>
-              <ImageIcon size={18} />
-            </button>
-            <button className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100" disabled={!activeConversation}>
-              <Sparkles size={18} />
-            </button>
-            <input
-              placeholder={activeConversation ? `Nhập tin nhắn tới ${activeConversation.name}` : "Chọn hội thoại để bắt đầu nhắn tin"}
-              className="h-10 flex-1 bg-transparent text-sm outline-none"
-              disabled={!activeConversation}
-            />
-            <button className="rounded-full bg-emerald-600 p-2 text-white transition hover:bg-emerald-500 disabled:opacity-50" disabled={!activeConversation}>
-              <Send size={16} />
-            </button>
-          </div>
+            </div>
+          )}
         </section>
 
         <aside className="hidden border-l border-slate-200 bg-slate-50 lg:block">
           <div className="border-b border-slate-200 px-4 py-4 text-center">
             {activeConversation ? (
               <>
-                <div className="mx-auto h-20 w-20 rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500" />
+                <div className={`mx-auto h-20 w-20 rounded-full bg-gradient-to-br ${activeConversation.avatarColor}`} />
                 <p className="mt-3 text-2xl font-bold text-slate-800">{activeConversation.name}</p>
                 <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-600">
                   <button className="rounded-xl bg-white p-2 shadow-sm">

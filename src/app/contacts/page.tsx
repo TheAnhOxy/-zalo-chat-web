@@ -7,10 +7,10 @@ import { useFriends, useGroups } from "@/src/hooks/use-contacts";
 import { PageLoader } from "@/src/components/ui/page-state";
 import {
   Bell,
-  BookMarked,
-  MessageSquare,
+  MessageCircle,
+  Layers,
+  User,
   Search,
-  Settings,
   Users,
   UserPlus,
   Cake,
@@ -118,27 +118,35 @@ export default function ContactsPage() {
       <div className="h-full w-full md:grid md:grid-cols-[72px_330px_1fr]">
         {/* Leftmost Sidebar - Navigation */}
         <aside className="relative hidden h-full flex-col items-center justify-between border-r border-emerald-200 bg-[#0f766e] py-4 text-white md:flex">
-          <div className="space-y-3">
-            <button className="relative flex h-11 w-11 items-center justify-center rounded-2xl bg-white/20 text-base font-bold ring-2 ring-white/30 transition hover:bg-white/30">
-              {userInitial}
+          <div className="space-y-3 flex flex-col items-center w-full">
+            {/* Inactive Tab: Tin nhắn */}
+            <button
+              onClick={() => router.push("/")}
+              className="relative flex h-14 w-full items-center justify-center bg-transparent text-white/60 hover:text-white hover:bg-white/5 transition"
+            >
+              <MessageCircle size={24} strokeWidth={2} />
             </button>
-            <button onClick={() => router.push("/")} className="flex h-11 w-11 items-center justify-center rounded-xl bg-transparent hover:bg-white/20 transition">
-              <MessageSquare size={18} />
+            {/* Active Tab: Danh bạ */}
+            <button
+              onClick={() => router.push("/contacts")}
+              className="relative flex h-14 w-full items-center justify-center bg-white/20 text-white shadow-inner before:absolute before:left-0 before:top-0 before:h-full before:w-1 before:bg-white transition"
+            >
+              <Users size={24} strokeWidth={2.5} />
             </button>
-            <button className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/30 shadow-inner">
-              <Users size={18} />
-            </button>
-            <button className="flex h-11 w-11 items-center justify-center rounded-xl bg-transparent hover:bg-white/20 transition">
-              <BookMarked size={18} />
+            {/* Inactive Tab: Tin/Nhật ký */}
+            <button className="relative flex h-14 w-full items-center justify-center bg-transparent text-white/60 hover:text-white hover:bg-white/5 transition">
+              <Layers size={24} strokeWidth={2} />
             </button>
           </div>
 
-          <div className="space-y-3">
-            <button className="flex h-11 w-11 items-center justify-center rounded-xl bg-transparent hover:bg-white/20 transition">
-              <Bell size={18} />
+          <div className="space-y-3 flex flex-col items-center w-full relative">
+            {/* Inactive Tab: Thông báo */}
+            <button className="relative flex h-14 w-full items-center justify-center bg-transparent text-white/60 hover:text-white hover:bg-white/5 transition">
+              <Bell size={24} strokeWidth={2} />
             </button>
-            <button className="flex h-11 w-11 items-center justify-center rounded-xl bg-transparent hover:bg-white/20 transition">
-              <Settings size={18} />
+            {/* Inactive Tab: Cá nhân */}
+            <button className="relative flex h-14 w-full items-center justify-center bg-transparent text-white/60 hover:text-white hover:bg-white/5 transition">
+              <User size={24} strokeWidth={2} />
             </button>
           </div>
         </aside>
@@ -170,15 +178,13 @@ export default function ContactsPage() {
           <div className="flex border-b border-slate-200">
             <button
               onClick={() => setActiveTab("FRIENDS")}
-              className={`flex-1 py-3 text-sm font-semibold transition ${activeTab === "FRIENDS" ? "border-b-2 border-emerald-600 text-emerald-700" : "text-slate-500 hover:bg-slate-100"
-                }`}
+              className={`flex-1 py-3 text-sm font-semibold transition ${activeTab === "FRIENDS" ? "border-b-2 border-emerald-600 text-emerald-700" : "text-slate-500 hover:bg-slate-100"}`}
             >
               Bạn bè
             </button>
             <button
               onClick={() => setActiveTab("GROUPS")}
-              className={`flex-1 py-3 text-sm font-semibold transition ${activeTab === "GROUPS" ? "border-b-2 border-emerald-600 text-emerald-700" : "text-slate-500 hover:bg-slate-100"
-                }`}
+              className={`flex-1 py-3 text-sm font-semibold transition ${activeTab === "GROUPS" ? "border-b-2 border-emerald-600 text-emerald-700" : "text-slate-500 hover:bg-slate-100"}`}
             >
               Nhóm
             </button>
@@ -308,7 +314,7 @@ export default function ContactsPage() {
         {/* Mobile Bottom Navigation - visible only on small screens */}
         <div className="fixed bottom-0 left-0 right-0 flex border-t border-slate-200 bg-white md:hidden">
           <button onClick={() => router.push("/")} className="flex flex-1 flex-col items-center py-3 text-slate-500">
-            <MessageSquare size={20} />
+            <MessageCircle size={20} />
             <span className="mt-1 text-[10px] font-medium">Tin nhắn</span>
           </button>
           <button className="flex flex-1 flex-col items-center py-3 text-emerald-600">
