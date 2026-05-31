@@ -3,6 +3,8 @@ import { getStoredTokens, clearStoredTokens, clearStoredUser } from "@/src/utils
 
 class SocketService {
   private socket: Socket | null = null;
+  // Lưu các handler đăng ký trước khi socket ready, flush sau khi connect
+  private pendingHandlers: Array<{ event: string; handler: (...args: any[]) => void }> = [];
 
   connect(userId: string) {
     if (this.socket?.connected) return;
@@ -24,6 +26,12 @@ class SocketService {
     this.socket.on("connect", () => {
       console.log("✅ Socket connected:", this.socket?.id);
       this.socket?.emit("join_user_room", { userId });
+
+      // Flush pending handlers đăng ký trước khi socket ready
+      for (const { event, handler } of this.pendingHandlers) {
+        this.socket?.on(event, handler);
+      }
+      this.pendingHandlers = [];
     });
 
     this.socket.on("disconnect", (reason) => {
@@ -55,18 +63,36 @@ class SocketService {
       this.socket.disconnect();
       this.socket = null;
     }
+    this.pendingHandlers = [];
   }
 
   emit(event: string, data: any) {
-    this.socket?.emit(event, data);
+    if (!this.socket?.connected) {
+      console.warn(`[Socket] emit '${event}' — socket not connected`);
+      return;
+    }
+    this.socket.emit(event, data);
   }
 
   on(event: string, handler: (...args: any[]) => void) {
-    this.socket?.on(event, handler);
+    if (this.socket) {
+      this.socket.on(event, handler);
+    } else {
+      // Socket chưa ready — lưu vào queue, flush sau khi connect
+      this.pendingHandlers.push({ event, handler });
+    }
   }
 
   off(event: string, handler: (...args: any[]) => void) {
     this.socket?.off(event, handler);
+    // Xóa khỏi pending queue nếu chưa flush
+    this.pendingHandlers = this.pendingHandlers.filter(
+      (h) => !(h.event === event && h.handler === handler)
+    );
+  }
+
+  get isConnected() {
+    return this.socket?.connected ?? false;
   }
 
   private handleUnauthorizedSocketError(reason: string) {

@@ -26,6 +26,15 @@ export function useGroups(userId?: string) {
   );
 }
 
+export function usePendingRequestCount(userId?: string) {
+  return useApiQuery(
+    () => contactsService.getPendingRequestCount(userId as string),
+    ["friend-requests", "pending-count", userId],
+    {},
+    { enabled: Boolean(userId) }
+  );
+}
+
 export function useReceivedRequests(userId?: string) {
   return useApiQuery(
     () => contactsService.getReceivedRequests(userId as string),

@@ -49,6 +49,17 @@
 }
 
 :root {
+  /* QuickChat — đồng bộ AppColors (mobile) */
+  --qc-primary: #388e3c;
+  --qc-primary-dark: #1b5e20;
+  --qc-primary-light: #e8f5e9;
+  --qc-accent: #66bb6a;
+  --qc-bg: #f0f2f5;
+  --qc-card: #ffffff;
+  --qc-divider: #e4e6eb;
+  --qc-text-primary: #111111;
+  --qc-text-secondary: #65676b;
+
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);

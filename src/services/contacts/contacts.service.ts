@@ -102,6 +102,15 @@ export const contactsService = {
     return apiClient.get<IUser>(`/users/phone/${normalized}`).then(res => res.data).catch(() => null);
   },
 
+  async getPendingRequestCount(userId: string): Promise<number> {
+    try {
+      const res = await apiClient.get<any[]>(`/friendships/user/${userId}`);
+      return res.data.filter((f) => f.status === "PENDING" && f.addresseeId === userId).length;
+    } catch {
+      return 0;
+    }
+  },
+
   sendFriendRequest(requesterId: string, receiverId: string, message?: string) {
     return apiClient.post(`/friendships`, { requesterId, addresseeId: receiverId, message });
   },
@@ -123,14 +132,31 @@ export const contactsService = {
   },
 
   async findOrCreateDirectConversation(currentUserId: string, targetUserId: string) {
-    const payload = {
-      type: "PRIVATE",
-      members: [
-        { userId: currentUserId, role: "MEMBER" },
-        { userId: targetUserId, role: "MEMBER" }
-      ]
-    };
-    return apiClient.post(`/conversations`, payload).then(res => res.data);
+    try {
+      // 1. Tìm trong danh sách hội thoại hiện có (giống logic mobile)
+      const res = await apiClient.get<any[]>(`/conversations/member/${currentUserId}`);
+      const existing = res.data.find(
+        (c: any) => c.type === "PRIVATE" && c.members.some((m: any) => m.userId === targetUserId || m._id === targetUserId)
+      );
+
+      if (existing) {
+        return existing;
+      }
+
+      // 2. Nếu chưa có, tạo mới
+      const payload = {
+        type: "PRIVATE",
+        members: [
+          { userId: currentUserId, role: "MEMBER" },
+          { userId: targetUserId, role: "MEMBER" }
+        ]
+      };
+      const createRes = await apiClient.post(`/conversations`, payload);
+      return createRes.data;
+    } catch (e) {
+      console.error("Failed to find or create conversation", e);
+      return null;
+    }
   },
 
   async uploadGroupAvatar(file: File): Promise<string> {

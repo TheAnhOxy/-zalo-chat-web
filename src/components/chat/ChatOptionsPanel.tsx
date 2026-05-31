@@ -11,6 +11,7 @@ import {
   Image as ImageIcon,
   Pin,
   Search,
+  Sparkles,
   Trash2,
   User,
   UserPlus,
@@ -311,6 +312,12 @@ export function ChatOptionsPanel({
                   ) : undefined
                 }
                 onClick={() => setShowPinnedList(true)}
+              />
+              <OptionsRow
+                icon={<Sparkles className="h-4 w-4 text-emerald-600" />}
+                label="Trợ lý AI"
+                href={`/ai?targetConversationId=${conversation._id}&summarize=1`}
+                onClick={onClose}
               />
             </OptionsSection>
           </div>

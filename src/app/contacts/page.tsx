@@ -1,162 +1,164 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { io } from "socket.io-client";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useAuthGuard } from "@/src/hooks/use-auth-guard";
-import { useFriends, useGroups } from "@/src/hooks/use-contacts";
+import { useFriends, useGroups, usePendingRequestCount } from "@/src/hooks/use-contacts";
+import { useQueryClient } from "@tanstack/react-query";
+import { socketService } from "@/src/services/socket/socket.service";
+import { contactsService } from "@/src/services/contacts/contacts.service";
 import { PageLoader } from "@/src/components/ui/page-state";
 import {
-  Bell,
-  MessageCircle,
-  Layers,
-  User,
   Search,
   Users,
   UserPlus,
   Cake,
-  Mail,
-  MoreHorizontal,
-  Phone,
-  Video,
+  ArrowUpDown,
+  Check,
+  Settings,
 } from "lucide-react";
+import { AppNavSidebar } from "@/src/components/layout/app-nav-sidebar";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 type Tab = "FRIENDS" | "GROUPS";
+type GroupSortMode = "RECENT" | "NAME" | "ADMIN";
+type FriendFilter = "ALL" | "RECENT";
 
 export default function ContactsPage() {
   const auth = useAuthGuard();
+  const router = useRouter();
+  const queryClient = useQueryClient();
+
   const friendsQuery = useFriends(auth.user?._id);
   const groupsQuery = useGroups(auth.user?._id);
-  const router = useRouter();
+  const pendingCountQuery = usePendingRequestCount(auth.user?._id);
 
   const [activeTab, setActiveTab] = useState<Tab>("FRIENDS");
   const [search, setSearch] = useState("");
-  const [groupSortMode, setGroupSortMode] = useState<"RECENT" | "NAME" | "ADMIN">("RECENT");
+  const [groupSortMode, setGroupSortMode] = useState<GroupSortMode>("RECENT");
+  const [showSortMenu, setShowSortMenu] = useState(false);
+  const [friendFilter, setFriendFilter] = useState<FriendFilter>("ALL");
+  const [openingChat, setOpeningChat] = useState<string | null>(null);
 
-  // Setup Socket.io for real-time group updates
+  const currentUserId = auth.user?._id ?? "";
+  const pendingCount = pendingCountQuery.data ?? 0;
+
+  // Real-time: dùng socketService chung, không tạo socket riêng
   useEffect(() => {
-    if (!auth.user?._id) return;
-
-    const socketURL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000";
-    const socket = io(socketURL, {
-      query: { userId: auth.user._id },
-      transports: ["websocket"]
-    });
-
-    const handleUpdate = () => {
-      groupsQuery.refetch();
+    if (!currentUserId) return;
+    const refresh = () => {
+      queryClient.invalidateQueries({ queryKey: ["groups", currentUserId] });
+      queryClient.invalidateQueries({ queryKey: ["friends", currentUserId] });
+      queryClient.invalidateQueries({ queryKey: ["friend-requests", "pending-count", currentUserId] });
     };
-
-    socket.on("conversation_updated", handleUpdate);
-    socket.on("new_message", handleUpdate);
-    socket.on("conversation_created", handleUpdate);
-    socket.on("conversation_removed", handleUpdate);
-
+    socketService.on("conversation_updated", refresh);
+    socketService.on("new_message", refresh);
+    socketService.on("conversation_created", refresh);
+    socketService.on("conversation_removed", refresh);
+    socketService.on("friendship_created", refresh);
+    socketService.on("friendship_updated", refresh);
     return () => {
-      socket.disconnect();
+      socketService.off("conversation_updated", refresh);
+      socketService.off("new_message", refresh);
+      socketService.off("conversation_created", refresh);
+      socketService.off("conversation_removed", refresh);
+      socketService.off("friendship_created", refresh);
+      socketService.off("friendship_updated", refresh);
     };
-  }, [auth.user?._id, groupsQuery]);
+  }, [currentUserId, queryClient]);
 
-  // Filter and sort groups
+  // Mở chat trực tiếp khi nhấn vào bạn bè
+  const handleOpenChat = useCallback(async (friendId: string) => {
+    if (!currentUserId || openingChat) return;
+    setOpeningChat(friendId);
+    try {
+      const conv = await contactsService.findOrCreateDirectConversation(currentUserId, friendId);
+      if (conv?._id) {
+        router.push(`/?conversation=${conv._id}`);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setOpeningChat(null);
+    }
+  }, [currentUserId, openingChat, router]);
+
+  // Lọc + sort bạn bè
+  const filteredFriends = useMemo(() => {
+    const list = friendsQuery.data || [];
+    const keyword = search.toLowerCase().trim();
+    return list.filter((f) => {
+      const matchSearch =
+        f.fullName?.toLowerCase().includes(keyword) ||
+        f.phone?.includes(keyword) ||
+        f.email?.toLowerCase().includes(keyword);
+      return matchSearch;
+    });
+  }, [friendsQuery.data, search]);
+
+  // Group theo chữ cái
+  const groupedFriends = useMemo(() => {
+    return filteredFriends.reduce((acc, friend) => {
+      const name = friend.fullName || "Unknown";
+      const letter = name.charAt(0).toUpperCase();
+      const groupKey = /[A-ZÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚÝĂĐƠƯ]/.test(letter) ? letter : "#";
+      if (!acc[groupKey]) acc[groupKey] = [];
+      acc[groupKey].push(friend);
+      return acc;
+    }, {} as Record<string, typeof filteredFriends>);
+  }, [filteredFriends]);
+
+  const sortedLetters = useMemo(() =>
+    Object.keys(groupedFriends).sort((a, b) => {
+      if (a === "#") return 1;
+      if (b === "#") return -1;
+      return a.localeCompare(b, "vi");
+    }),
+    [groupedFriends]
+  );
+
+  // Lọc + sort nhóm
   const filteredGroups = useMemo(() => {
     const list = groupsQuery.data || [];
     const keyword = search.toLowerCase().trim();
     let result = list.filter((g) => g.name?.toLowerCase().includes(keyword));
 
     if (groupSortMode === "ADMIN") {
-      result = result.filter(g => g.members?.some(m => m.userId === auth.user?._id && m.role === "ADMIN"));
+      result = result.filter((g) =>
+        g.members?.some((m) => m.userId === currentUserId && m.role === "ADMIN")
+      );
     }
-
-    result = result.sort((a, b) => {
-      if (groupSortMode === "NAME") {
-        return (a.name || "").localeCompare(b.name || "");
-      }
-      const timeA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-      const timeB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-      return timeB - timeA;
+    result = [...result].sort((a, b) => {
+      if (groupSortMode === "NAME") return (a.name || "").localeCompare(b.name || "", "vi");
+      const ta = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      const tb = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      return tb - ta;
     });
-
     return result;
-  }, [groupsQuery.data, search, groupSortMode, auth.user?._id]);
+  }, [groupsQuery.data, search, groupSortMode, currentUserId]);
 
-  if (!auth.isInitialized || !auth.user) {
-    return <PageLoader />;
-  }
+  if (!auth.isInitialized || !auth.user) return <PageLoader />;
 
-  const userInitial = auth.user.fullName?.charAt(0).toUpperCase() || "U";
-
-  const friendsList = friendsQuery.data || [];
-
-  const filteredFriends = friendsList.filter((f) => {
-    const keyword = search.toLowerCase().trim();
-    return (
-      f.fullName?.toLowerCase().includes(keyword) ||
-      f.phone?.includes(keyword) ||
-      f.email?.toLowerCase().includes(keyword)
-    );
-  });
-
-  const groupedFriends = filteredFriends.reduce((acc, friend) => {
-    const name = friend.fullName || "Unknown";
-    const letter = name.charAt(0).toUpperCase();
-    const groupKey = /[A-Z]/.test(letter) ? letter : "#";
-    if (!acc[groupKey]) acc[groupKey] = [];
-    acc[groupKey].push(friend);
-    return acc;
-  }, {} as Record<string, typeof friendsList>);
-
-  const sortedLetters = Object.keys(groupedFriends).sort((a, b) => {
-    if (a === "#") return 1;
-    if (b === "#") return -1;
-    return a.localeCompare(b);
-  });
+  const sortLabels: Record<GroupSortMode, string> = {
+    RECENT: "Hoạt động cuối",
+    NAME: "Tên nhóm",
+    ADMIN: "Nhóm quản lý",
+  };
 
   return (
     <main className="h-screen overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-amber-50 text-slate-800">
       <div className="h-full w-full md:grid md:grid-cols-[72px_330px_1fr]">
-        {/* Leftmost Sidebar - Navigation */}
-        <aside className="relative hidden h-full flex-col items-center justify-between border-r border-emerald-200 bg-[#0f766e] py-4 text-white md:flex">
-          <div className="space-y-3 flex flex-col items-center w-full">
-            {/* Inactive Tab: Tin nhắn */}
-            <button
-              onClick={() => router.push("/")}
-              className="relative flex h-14 w-full items-center justify-center bg-transparent text-white/60 hover:text-white hover:bg-white/5 transition"
-            >
-              <MessageCircle size={24} strokeWidth={2} />
-            </button>
-            {/* Active Tab: Danh bạ */}
-            <button
-              onClick={() => router.push("/contacts")}
-              className="relative flex h-14 w-full items-center justify-center bg-white/20 text-white shadow-inner before:absolute before:left-0 before:top-0 before:h-full before:w-1 before:bg-white transition"
-            >
-              <Users size={24} strokeWidth={2.5} />
-            </button>
-            {/* Inactive Tab: Tin/Nhật ký */}
-            <button className="relative flex h-14 w-full items-center justify-center bg-transparent text-white/60 hover:text-white hover:bg-white/5 transition">
-              <Layers size={24} strokeWidth={2} />
-            </button>
-          </div>
 
-          <div className="space-y-3 flex flex-col items-center w-full relative">
-            {/* Inactive Tab: Thông báo */}
-            <button className="relative flex h-14 w-full items-center justify-center bg-transparent text-white/60 hover:text-white hover:bg-white/5 transition">
-              <Bell size={24} strokeWidth={2} />
-            </button>
-            {/* Inactive Tab: Cá nhân */}
-            <button className="relative flex h-14 w-full items-center justify-center bg-transparent text-white/60 hover:text-white hover:bg-white/5 transition">
-              <User size={24} strokeWidth={2} />
-            </button>
-          </div>
-        </aside>
+        <AppNavSidebar activeTab="contacts" />
 
-        {/* Contacts List Sidebar */}
-        <section className="flex flex-col border-r border-slate-200 bg-slate-50">
-          <div className="border-b border-slate-200 px-4 py-3">
+        {/* ── Contacts Sidebar ── */}
+        <section className="flex flex-col border-r border-slate-200 bg-slate-50 h-full overflow-hidden">
+          {/* Search + Add */}
+          <div className="border-b border-slate-200 px-4 py-3 shrink-0">
             <div className="flex items-center gap-2">
               <div className="flex flex-1 items-center gap-2 rounded-xl bg-slate-200/70 px-3 py-2">
-                <Search size={16} className="text-slate-500" />
+                <Search size={16} className="text-slate-500 shrink-0" />
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
@@ -174,69 +176,129 @@ export default function ContactsPage() {
             </div>
           </div>
 
-          {/* Tabs */}
-          <div className="flex border-b border-slate-200">
+          {/* Tabs: Bạn bè / Nhóm */}
+          <div className="flex border-b border-slate-200 shrink-0">
             <button
               onClick={() => setActiveTab("FRIENDS")}
-              className={`flex-1 py-3 text-sm font-semibold transition ${activeTab === "FRIENDS" ? "border-b-2 border-emerald-600 text-emerald-700" : "text-slate-500 hover:bg-slate-100"}`}
+              className={`flex-1 py-3 text-sm font-semibold transition ${
+                activeTab === "FRIENDS"
+                  ? "border-b-2 border-emerald-600 text-emerald-700"
+                  : "text-slate-500 hover:bg-slate-100"
+              }`}
             >
               Bạn bè
             </button>
             <button
               onClick={() => setActiveTab("GROUPS")}
-              className={`flex-1 py-3 text-sm font-semibold transition ${activeTab === "GROUPS" ? "border-b-2 border-emerald-600 text-emerald-700" : "text-slate-500 hover:bg-slate-100"}`}
+              className={`flex-1 py-3 text-sm font-semibold transition ${
+                activeTab === "GROUPS"
+                  ? "border-b-2 border-emerald-600 text-emerald-700"
+                  : "text-slate-500 hover:bg-slate-100"
+              }`}
             >
               Nhóm
             </button>
           </div>
 
+          {/* Content */}
           <div className="flex-1 overflow-y-auto">
-            {activeTab === "FRIENDS" && (
-              <div className="py-2">
-                {/* Quick Actions */}
-                <Link href="/contacts/requests" className="flex items-center gap-3 px-4 py-3 hover:bg-slate-100 transition">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-600">
-                    <Mail size={20} />
-                  </div>
-                  <div className="flex-1 text-sm font-medium">Lời mời kết bạn</div>
-                </Link>
-                <Link href="/contacts/birthdays" className="flex items-center gap-3 px-4 py-3 hover:bg-slate-100 transition">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-rose-100 text-rose-600">
-                    <Cake size={20} />
-                  </div>
-                  <div className="flex-1 text-sm font-medium">Sinh nhật</div>
-                </Link>
 
-                <div className="mt-2 border-t border-slate-200 px-4 py-2">
-                  <p className="text-xs font-semibold text-slate-500 uppercase">Bạn bè ({filteredFriends.length})</p>
+            {/* ── Bạn bè tab ── */}
+            {activeTab === "FRIENDS" && (
+              <div>
+                {/* Quick Actions */}
+                <div className="pt-2">
+                  {/* Lời mời kết bạn — có badge số đếm */}
+                  <Link
+                    href="/contacts/requests"
+                    className="flex items-center gap-3 px-4 py-3 hover:bg-slate-100 transition"
+                  >
+                    <div className="relative flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 shrink-0">
+                      <UserPlus size={20} />
+                      {pendingCount > 0 && (
+                        <span className="absolute -right-1 -top-1 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white">
+                          {pendingCount > 99 ? "99+" : pendingCount}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex-1 text-sm font-medium">
+                      {pendingCount > 0 ? `Lời mời kết bạn (${pendingCount})` : "Lời mời kết bạn"}
+                    </div>
+                  </Link>
+
+                  {/* Sinh nhật */}
+                  <Link
+                    href="/contacts/birthdays"
+                    className="flex items-center gap-3 px-4 py-3 hover:bg-slate-100 transition"
+                  >
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-100 text-amber-600 shrink-0">
+                      <Cake size={20} />
+                    </div>
+                    <div className="flex-1 text-sm font-medium">Sinh nhật</div>
+                  </Link>
                 </div>
 
-                {/* Friend List */}
-                <div className="space-y-1 pb-4">
+                {/* Filter chips: Tất cả / Mới truy cập */}
+                <div className="flex gap-2 border-t border-slate-200 px-4 py-3">
+                  {(["ALL", "RECENT"] as FriendFilter[]).map((f) => (
+                    <button
+                      key={f}
+                      onClick={() => setFriendFilter(f)}
+                      className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                        friendFilter === f
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                      }`}
+                    >
+                      {f === "ALL" ? `Tất cả ${filteredFriends.length}` : "Mới truy cập"}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Friend list grouped by letter */}
+                <div className="pb-4">
                   {friendsQuery.isLoading ? (
-                    <div className="px-4 py-8 text-center text-sm text-slate-500">Đang tải danh sách bạn bè...</div>
+                    <div className="px-4 py-8 text-center text-sm text-slate-500">
+                      Đang tải danh sách bạn bè...
+                    </div>
                   ) : filteredFriends.length === 0 ? (
                     <div className="px-4 py-8 text-center text-sm text-slate-500">
-                      {search ? "Không tìm thấy bạn bè nào phù hợp." : "Chưa có bạn bè nào."}
+                      {search ? `Không tìm thấy "${search}"` : "Chưa có bạn bè nào."}
                     </div>
                   ) : (
                     sortedLetters.map((letter) => (
-                      <div key={letter} className="mb-2">
-                        <div className="px-4 py-1 text-sm font-semibold text-slate-800 bg-slate-50">
+                      <div key={letter}>
+                        <div className="px-4 py-1.5 text-xs font-bold text-slate-500 bg-slate-100/60 uppercase tracking-wide">
                           {letter}
                         </div>
                         {groupedFriends[letter].map((friend) => (
-                          <button key={friend._id} className="flex w-full items-center gap-3 px-4 py-2 hover:bg-slate-100 transition text-left">
-                            <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500 text-white font-bold">
+                          <button
+                            key={friend._id}
+                            onClick={() => handleOpenChat(friend._id)}
+                            disabled={openingChat === friend._id}
+                            className="flex w-full items-center gap-3 px-4 py-2.5 hover:bg-slate-100 transition text-left disabled:opacity-60"
+                          >
+                            <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-emerald-400 to-cyan-500 text-white font-bold text-sm">
                               {friend.avatar ? (
-                                <Image src={friend.avatar} alt={friend.fullName || "Avatar"} fill className="object-cover" unoptimized />
+                                <Image
+                                  src={friend.avatar}
+                                  alt={friend.fullName || "Avatar"}
+                                  fill
+                                  className="object-cover"
+                                  unoptimized
+                                />
                               ) : (
                                 (friend.fullName || "U").charAt(0).toUpperCase()
                               )}
                             </div>
                             <div className="flex-1 overflow-hidden">
-                              <p className="truncate text-sm font-medium text-slate-800">{friend.fullName}</p>
+                              <p className="truncate text-sm font-medium text-slate-800">
+                                {friend.fullName}
+                              </p>
                             </div>
+                            {openingChat === friend._id && (
+                              <span className="text-xs text-slate-400">Đang mở...</span>
+                            )}
                           </button>
                         ))}
                       </div>
@@ -246,51 +308,132 @@ export default function ContactsPage() {
               </div>
             )}
 
+            {/* ── Nhóm tab ── */}
             {activeTab === "GROUPS" && (
-              <div className="py-2">
-                <Link href="/groups/create" className="flex items-center gap-3 px-4 py-3 hover:bg-slate-100 transition">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
-                    <Users size={20} />
-                  </div>
-                  <div className="flex-1 text-sm font-medium">Tạo nhóm mới</div>
-                </Link>
-
-                <div className="mt-2 flex items-center justify-between border-t border-slate-200 px-4 py-2">
-                  <p className="text-xs font-semibold text-slate-500 uppercase">Nhóm đang tham gia ({filteredGroups.length})</p>
-                  <select
-                    value={groupSortMode}
-                    onChange={(e) => setGroupSortMode(e.target.value as any)}
-                    className="cursor-pointer bg-transparent text-xs font-medium text-slate-600 outline-none"
+              <div>
+                {/* Tạo nhóm mới */}
+                <div className="pt-2">
+                  <Link
+                    href="/groups/create"
+                    className="flex items-center gap-3 px-4 py-3 hover:bg-slate-100 transition"
                   >
-                    <option value="RECENT">Hoạt động cuối</option>
-                    <option value="NAME">Tên nhóm (A-Z)</option>
-                    <option value="ADMIN">Nhóm quản lý</option>
-                  </select>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 shrink-0">
+                      <Users size={20} />
+                    </div>
+                    <div className="flex-1 text-sm font-medium">Tạo nhóm mới</div>
+                  </Link>
                 </div>
 
-                <div className="space-y-1 pb-4">
+                {/* Header + Sort */}
+                <div className="relative flex items-center justify-between border-t border-slate-200 px-4 py-2.5">
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+                    {groupSortMode === "ADMIN"
+                      ? `Nhóm quản lý (${filteredGroups.length})`
+                      : `Nhóm đang tham gia (${filteredGroups.length})`}
+                  </p>
+                  <button
+                    onClick={() => setShowSortMenu((v) => !v)}
+                    className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold transition ${
+                      groupSortMode !== "RECENT"
+                        ? "bg-emerald-100 text-emerald-700"
+                        : "text-slate-500 hover:bg-slate-100"
+                    }`}
+                  >
+                    <ArrowUpDown size={12} />
+                    {sortLabels[groupSortMode]}
+                  </button>
+
+                  {/* Sort dropdown */}
+                  {showSortMenu && (
+                    <div className="absolute right-4 top-10 z-30 w-44 rounded-xl border border-slate-200 bg-white shadow-xl">
+                      {(["RECENT", "NAME", "ADMIN"] as GroupSortMode[]).map((mode) => (
+                        <button
+                          key={mode}
+                          onClick={() => { setGroupSortMode(mode); setShowSortMenu(false); }}
+                          className={`flex w-full items-center justify-between px-4 py-2.5 text-sm transition first:rounded-t-xl last:rounded-b-xl ${
+                            groupSortMode === mode
+                              ? "bg-emerald-50 font-bold text-emerald-700"
+                              : "text-slate-700 hover:bg-slate-50"
+                          }`}
+                        >
+                          {sortLabels[mode]}
+                          {groupSortMode === mode && <Check size={14} />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Group list */}
+                <div className="pb-4">
                   {groupsQuery.isLoading ? (
-                    <div className="px-4 py-8 text-center text-sm text-slate-500">Đang tải danh sách nhóm...</div>
+                    <div className="px-4 py-8 text-center text-sm text-slate-500">
+                      Đang tải danh sách nhóm...
+                    </div>
                   ) : filteredGroups.length === 0 ? (
                     <div className="px-4 py-8 text-center text-sm text-slate-500">
-                      {search ? "Không tìm thấy nhóm nào phù hợp." : "Bạn chưa tham gia nhóm nào."}
+                      {search ? `Không tìm thấy "${search}"` : "Bạn chưa tham gia nhóm nào."}
                     </div>
                   ) : (
-                    filteredGroups.map((group) => (
-                      <button key={group._id} className="flex w-full items-center gap-3 px-4 py-2 hover:bg-slate-100 transition text-left">
-                        <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 text-white font-bold">
-                          {group.avatar ? (
-                            <Image src={group.avatar} alt={group.name || "Avatar"} fill className="object-cover" unoptimized />
-                          ) : (
-                            <Users size={20} />
-                          )}
+                    filteredGroups.map((group) => {
+                      const conversationId = group._id || (group as { id?: string }).id || "";
+                      const isAdmin = group.members?.some(
+                        (m) => m.userId === currentUserId && m.role === "ADMIN"
+                      );
+                      return (
+                        <div
+                          key={conversationId}
+                          onClick={() => {
+                            if (!conversationId) return;
+                            router.push(`/?conversation=${conversationId}`);
+                          }}
+                          className="flex w-full items-center gap-3 px-4 py-2.5 hover:bg-slate-100 transition text-left cursor-pointer"
+                        >
+                          <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 text-white font-bold">
+                            {group.avatar ? (
+                              <Image
+                                src={group.avatar}
+                                alt={group.name || "Avatar"}
+                                fill
+                                className="object-cover"
+                                unoptimized
+                              />
+                            ) : (
+                              <Users size={20} />
+                            )}
+                          </div>
+                          <div className="flex-1 overflow-hidden">
+                            <p className="truncate text-sm font-semibold text-slate-800">
+                              {group.name}
+                            </p>
+                            <p className="truncate text-xs text-slate-500 mt-0.5">
+                              {group.memberCount || 0} thành viên
+                            </p>
+                          </div>
+                          <div className="flex flex-col items-end gap-1 shrink-0">
+                            {group.updatedAt && (
+                              <span className="text-[11px] text-slate-400">
+                                {new Date(group.updatedAt).toLocaleDateString("vi-VN", { weekday: "short" })}
+                              </span>
+                            )}
+                            {/* Nút quản lý dành cho ADMIN — giống di động */}
+                            {isAdmin && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (!conversationId) return;
+                                  router.push(`/?conversation=${conversationId}&tab=options`);
+                                }}
+                                className="flex items-center gap-1 rounded-lg bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100 transition"
+                              >
+                                <Settings size={11} />
+                                Quản lý
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex-1 overflow-hidden">
-                          <p className="truncate text-sm font-semibold text-slate-800">{group.name}</p>
-                          <p className="truncate text-xs text-slate-500 mt-0.5">{group.memberCount || 0} thành viên</p>
-                        </div>
-                      </button>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -298,9 +441,9 @@ export default function ContactsPage() {
           </div>
         </section>
 
-        {/* Main Content Area */}
+        {/* ── Main content placeholder ── */}
         <section className="hidden flex-col bg-white md:flex">
-          <div className="flex h-full flex-col items-center justify-center text-center">
+          <div className="flex h-full flex-col items-center justify-center text-center px-6">
             <div className="mb-4 flex h-24 w-24 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
               <Users size={48} />
             </div>
@@ -311,22 +454,12 @@ export default function ContactsPage() {
           </div>
         </section>
 
-        {/* Mobile Bottom Navigation - visible only on small screens */}
-        <div className="fixed bottom-0 left-0 right-0 flex border-t border-slate-200 bg-white md:hidden">
-          <button onClick={() => router.push("/")} className="flex flex-1 flex-col items-center py-3 text-slate-500">
-            <MessageCircle size={20} />
-            <span className="mt-1 text-[10px] font-medium">Tin nhắn</span>
-          </button>
-          <button className="flex flex-1 flex-col items-center py-3 text-emerald-600">
-            <Users size={20} />
-            <span className="mt-1 text-[10px] font-medium">Danh bạ</span>
-          </button>
-          <button className="flex flex-1 flex-col items-center py-3 text-slate-500">
-            <UserPlus size={20} />
-            <span className="mt-1 text-[10px] font-medium">Cá nhân</span>
-          </button>
-        </div>
       </div>
+
+      {/* Click outside để đóng sort menu */}
+      {showSortMenu && (
+        <div className="fixed inset-0 z-20" onClick={() => setShowSortMenu(false)} />
+      )}
     </main>
   );
 }
