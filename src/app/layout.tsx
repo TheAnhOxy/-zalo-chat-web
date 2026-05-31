@@ -13,9 +13,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="vi">
+    <html lang="vi" suppressHydrationWarning>
       {/* Thêm class "dark" vào body nếu bạn muốn test giao diện tối luôn */}
-      <body className="antialiased">
+      <body className="antialiased" suppressHydrationWarning>
         <AppProvider>{children}</AppProvider>
       </body>
     </html>

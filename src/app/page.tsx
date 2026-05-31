@@ -1,30 +1,28 @@
 "use client";
 
 import Image from "next/image";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { socketService } from "@/src/services/socket/socket.service";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
   BookMarked,
   ChevronDown,
-  CircleUserRound,
   Dot,
   Eye,
   EyeOff,
-  Image as ImageIcon,
   KeyRound,
-  LogOut,
-  MessageSquare,
   Search,
   Settings,
   ShieldCheck,
-  Sparkles,
-  UserRoundPen,
   Users,
   X,
 } from "lucide-react";
+import { AppNavSidebar } from "@/src/components/layout/app-nav-sidebar";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthGuard } from "@/src/hooks/use-auth-guard";
 import { ChatWindow } from "@/src/components/chat/ChatWindow";
+import { WelcomeEmptyState } from "@/src/components/chat/WelcomeEmptyState";
 import {
   useProfile,
   useUpdatePrivacy,
@@ -141,6 +139,9 @@ function buildConversationCard(conversation: IConversation, currentUserId: strin
 
 export default function HomePage() {
   const auth = useAuthGuard();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const conversationIdParam = searchParams.get("conversation");
   const { showToast } = useToast();
 
   const profileQuery = useProfile(auth.user?._id);
@@ -157,7 +158,6 @@ export default function HomePage() {
   const [search, setSearch] = useState("");
   const [readFilter, setReadFilter] = useState<ReadFilter>("ALL");
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-  const [showAccountMenu, setShowAccountMenu] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [profileEditMode, setProfileEditMode] = useState(false);
@@ -190,12 +190,39 @@ export default function HomePage() {
   const profile = profileQuery.data;
   const currentUserId = auth.user?._id;
 
+  const queryClient = useQueryClient();
+
   const conversationsQuery = useQuery({
     queryKey: ["conversations", currentUserId],
     queryFn: () => conversationsApi.listForUser(currentUserId!),
     enabled: Boolean(auth.isInitialized && currentUserId),
     staleTime: 30_000,
   });
+
+  // ✅ Real-time: cập nhật danh sách conversation khi có tin nhắn mới
+  useEffect(() => {
+    if (!currentUserId) return;
+
+    const handleNewMessage = () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations", currentUserId] });
+    };
+
+    const handleConversationUpdated = () => {
+      queryClient.invalidateQueries({ queryKey: ["conversations", currentUserId] });
+    };
+
+    socketService.on("new_message", handleNewMessage);
+    socketService.on("conversation_updated", handleConversationUpdated);
+    socketService.on("conversation_created", handleConversationUpdated);
+    socketService.on("conversation_removed", handleConversationUpdated);
+
+    return () => {
+      socketService.off("new_message", handleNewMessage);
+      socketService.off("conversation_updated", handleConversationUpdated);
+      socketService.off("conversation_created", handleConversationUpdated);
+      socketService.off("conversation_removed", handleConversationUpdated);
+    };
+  }, [currentUserId, queryClient]);
 
   const conversationCards = useMemo(() => {
     const list = conversationsQuery.data ?? [];
@@ -251,22 +278,15 @@ export default function HomePage() {
     setTwoFactorEnabled(Boolean(profile.settings?.twoFactorAuth));
   }, [profile]);
 
+  // Chỉ mở chat khi URL có ?conversation= (user chọn hoặc điều hướng từ danh bạ)
   useEffect(() => {
-    if (conversationCards.length === 0) {
+    if (!conversationIdParam) {
       setActiveConversationId(null);
       return;
     }
-
-    if (!activeConversationId) {
-      setActiveConversationId(conversationCards[0].id);
-      return;
-    }
-
-    const stillExists = conversationCards.some((item) => item.id === activeConversationId);
-    if (!stillExists) {
-      setActiveConversationId(null);
-    }
-  }, [activeConversationId, conversationCards]);
+    const exists = conversationCards.some((item) => item.id === conversationIdParam);
+    setActiveConversationId(exists ? conversationIdParam : null);
+  }, [conversationIdParam, conversationCards]);
 
   const filteredConversations = useMemo(() => {
     return conversationCards.filter((item) => {
@@ -438,69 +458,14 @@ export default function HomePage() {
 
   return (
     <main className="h-screen overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-amber-50 text-slate-800">
-      <div className="h-full w-full md:grid md:grid-cols-[72px_330px_1fr_320px]">
-        <aside className="relative hidden h-full flex-col items-center justify-between border-r border-emerald-200 bg-[#0f766e] py-4 text-white md:flex">
-          <div className="space-y-3">
-            <button
-              onClick={() => setShowAccountMenu((prev) => !prev)}
-              className="relative flex h-11 w-11 items-center justify-center rounded-2xl bg-white/20 text-base font-bold ring-2 ring-white/30 transition hover:bg-white/30"
-            >
-              {userInitial}
-            </button>
-
-            {showAccountMenu ? (
-              <div className="absolute left-16 top-4 z-40 w-72 rounded-2xl border border-emerald-200 bg-white p-4 text-slate-700 shadow-2xl">
-                <div className="mb-3 border-b border-slate-100 pb-3">
-                  <p className="font-semibold">{userName}</p>
-                  <p className="text-sm text-slate-500">{profile?.status?.isOnline ? "Đang hoạt động" : "Hoạt động gần đây"}</p>
-                </div>
-                <div className="space-y-1 text-sm">
-                  <button
-                    onClick={() => {
-                      setShowProfileModal(true);
-                      setShowAccountMenu(false);
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 transition hover:bg-emerald-50"
-                  >
-                    <UserRoundPen size={16} /> Hồ sơ của bạn
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowSettingsModal(true);
-                      setSettingsTab("GENERAL");
-                      setShowAccountMenu(false);
-                    }}
-                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 transition hover:bg-emerald-50"
-                  >
-                    <Settings size={16} /> Cài đặt
-                  </button>
-                  <button onClick={auth.logout} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-rose-600 transition hover:bg-rose-50">
-                    <LogOut size={16} /> Đăng xuất
-                  </button>
-                </div>
-              </div>
-            ) : null}
-
-            <button className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20 hover:bg-white/30">
-              <MessageSquare size={18} />
-            </button>
-            <button className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20 hover:bg-white/30">
-              <Users size={18} />
-            </button>
-            <button className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20 hover:bg-white/30">
-              <BookMarked size={18} />
-            </button>
-          </div>
-
-          <div className="space-y-3">
-            <button className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20 hover:bg-white/30">
-              <Bell size={18} />
-            </button>
-            <button className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20 hover:bg-white/30">
-              <Settings size={18} />
-            </button>
-          </div>
-        </aside>
+      <div
+        className={`h-full w-full md:grid ${
+          activeConversationId
+            ? "md:grid-cols-[72px_330px_1fr_320px]"
+            : "md:grid-cols-[72px_330px_1fr]"
+        }`}
+      >
+        <AppNavSidebar activeTab="messages" />
 
         <section className="border-r border-slate-200 bg-slate-50">
           <div className="border-b border-slate-200 p-3">
@@ -534,9 +499,8 @@ export default function HomePage() {
                 <button
                   key={item.key}
                   onClick={() => setReadFilter(item.key as ReadFilter)}
-                  className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                    readFilter === item.key ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-600 hover:bg-slate-300"
-                  }`}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition ${readFilter === item.key ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-600 hover:bg-slate-300"
+                    }`}
                 >
                   {item.label}
                 </button>
@@ -552,10 +516,12 @@ export default function HomePage() {
             {filteredConversations.map((item) => (
               <button
                 key={item.id}
-                onClick={() => setActiveConversationId(item.id)}
-                className={`grid w-full grid-cols-[52px_1fr_auto] gap-3 border-b border-slate-100 px-3 py-3 text-left transition hover:bg-white ${
-                  activeConversationId === item.id ? "bg-white" : "bg-transparent"
-                }`}
+                onClick={() => {
+                  setActiveConversationId(item.id);
+                  router.replace(`/?conversation=${item.id}`, { scroll: false });
+                }}
+                className={`grid w-full grid-cols-[52px_1fr_auto] gap-3 border-b border-slate-100 px-3 py-3 text-left transition hover:bg-white ${activeConversationId === item.id ? "bg-white" : "bg-transparent"
+                  }`}
               >
                 <div className={`relative mt-0.5 h-12 w-12 rounded-full overflow-hidden bg-gradient-to-br ${item.avatarColor}`}>
                   {item.avatar || (item.otherId ? userCache[item.otherId]?.avatar : undefined) ? (
@@ -596,96 +562,55 @@ export default function HomePage() {
           {activeConversationId ? (
             <ChatWindow conversationId={activeConversationId} />
           ) : (
-            <div className="flex h-full items-center justify-center bg-slate-100/70 px-5">
-              <div className="mx-auto mt-8 max-w-2xl">
-                <div className="rounded-3xl border border-emerald-200 bg-gradient-to-r from-emerald-100 to-amber-100 p-6 text-center shadow-sm">
-                  <p className="text-2xl font-bold text-emerald-900">Chào mừng đến với QuickChat PC!</p>
-                  <p className="mt-2 text-sm text-slate-700">
-                    Khám phá những tiện ích hỗ trợ làm việc và trò chuyện cùng người thân, bạn bè được tối ưu hóa cho máy tính của bạn.
-                  </p>
-                </div>
-
-                <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-slate-700 shadow-sm">
-                  <p className="font-semibold text-amber-900">Kinh doanh hiệu quả với zBusiness Pro</p>
-                  <p className="mt-1">
-                    Bán hàng chuyên nghiệp với Nhãn Business và Bộ công cụ kinh doanh, mở khóa tiềm năng tiếp cận khách hàng trên Zalo.
-                  </p>
-                </div>
-
-                <div className="mt-6 grid gap-3 md:grid-cols-3">
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="font-semibold text-slate-800">Đồng bộ đa thiết bị</p>
-                    <p className="mt-1 text-xs text-slate-500">Làm việc liên tục trên mọi nền tảng.</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="font-semibold text-slate-800">Bảo mật linh hoạt</p>
-                    <p className="mt-1 text-xs text-slate-500">Quản lý phiên đăng nhập và quyền riêng tư.</p>
-                  </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <p className="font-semibold text-slate-800">Giao diện tối ưu</p>
-                    <p className="mt-1 text-xs text-slate-500">Không gian làm việc gọn gàng, trực quan.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <WelcomeEmptyState />
           )}
         </section>
 
-        <aside className="hidden border-l border-slate-200 bg-slate-50 lg:block">
-          <div className="border-b border-slate-200 px-4 py-4 text-center">
-            {activeConversation ? (
-              <>
-                <div className={`mx-auto h-20 w-20 rounded-full bg-gradient-to-br ${activeConversation.avatarColor}`} />
-                <p className="mt-3 text-2xl font-bold text-slate-800">{activeConversation.name}</p>
-                <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-600">
-                  <button className="rounded-xl bg-white p-2 shadow-sm">
-                    <Bell size={14} className="mx-auto" /> Tắt thông báo
-                  </button>
-                  <button className="rounded-xl bg-white p-2 shadow-sm">
-                    <BookMarked size={14} className="mx-auto" /> Ghim hội thoại
-                  </button>
-                  <button className="rounded-xl bg-white p-2 shadow-sm">
-                    <Users size={14} className="mx-auto" /> Tạo nhóm
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
-                  <CircleUserRound size={34} />
-                </div>
-                <p className="mt-3 text-lg font-bold text-slate-800">Thông tin hội thoại</p>
-                <p className="mt-1 text-sm text-slate-500">Hãy chọn một cuộc trò chuyện để xem chi tiết.</p>
-              </>
-            )}
-          </div>
-
-          <div className="space-y-2 p-4 text-sm">
-            <div className="rounded-xl bg-white p-3 shadow-sm">
-              <p className="mb-2 flex items-center gap-2 font-semibold text-slate-700">
-                <Dot /> Danh sách nhắc hẹn
-              </p>
-              <p className="text-slate-500">2 nhóm chung</p>
-            </div>
-
-            <div className="rounded-xl bg-white p-3 shadow-sm">
-              <p className="mb-2 font-semibold text-slate-700">Ảnh/Video</p>
-              <div className="grid grid-cols-3 gap-2">
-                {Array.from({ length: 6 }).map((_, index) => (
-                  <div key={`thumb-${index}`} className="aspect-square rounded-lg bg-gradient-to-br from-slate-200 to-slate-300" />
-                ))}
+        {activeConversationId && activeConversation ? (
+          <aside className="hidden border-l border-slate-200 bg-slate-50 lg:block">
+            <div className="border-b border-slate-200 px-4 py-4 text-center">
+              <div className={`mx-auto h-20 w-20 rounded-full bg-gradient-to-br ${activeConversation.avatarColor}`} />
+              <p className="mt-3 text-2xl font-bold text-slate-800">{activeConversation.name}</p>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-xs text-slate-600">
+                <button className="rounded-xl bg-white p-2 shadow-sm">
+                  <Bell size={14} className="mx-auto" /> Tắt thông báo
+                </button>
+                <button className="rounded-xl bg-white p-2 shadow-sm">
+                  <BookMarked size={14} className="mx-auto" /> Ghim hội thoại
+                </button>
+                <button className="rounded-xl bg-white p-2 shadow-sm">
+                  <Users size={14} className="mx-auto" /> Tạo nhóm
+                </button>
               </div>
             </div>
 
-            <div className="rounded-xl bg-white p-3 shadow-sm">
-              <p className="mb-2 font-semibold text-slate-700">Tệp</p>
-              <div className="flex items-center justify-between rounded-lg bg-slate-100 px-3 py-2">
-                <span>Proposal_Q2.pdf</span>
-                <span className="text-xs text-slate-500">4.2MB</span>
+            <div className="space-y-2 p-4 text-sm">
+              <div className="rounded-xl bg-white p-3 shadow-sm">
+                <p className="mb-2 flex items-center gap-2 font-semibold text-slate-700">
+                  <Dot /> Danh sách nhắc hẹn
+                </p>
+                <p className="text-slate-500">2 nhóm chung</p>
+              </div>
+
+              <div className="rounded-xl bg-white p-3 shadow-sm">
+                <p className="mb-2 font-semibold text-slate-700">Ảnh/Video</p>
+                <div className="grid grid-cols-3 gap-2">
+                  {Array.from({ length: 6 }).map((_, index) => (
+                    <div key={`thumb-${index}`} className="aspect-square rounded-lg bg-gradient-to-br from-slate-200 to-slate-300" />
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-xl bg-white p-3 shadow-sm">
+                <p className="mb-2 font-semibold text-slate-700">Tệp</p>
+                <div className="flex items-center justify-between rounded-lg bg-slate-100 px-3 py-2">
+                  <span>Proposal_Q2.pdf</span>
+                  <span className="text-xs text-slate-500">4.2MB</span>
+                </div>
               </div>
             </div>
-          </div>
-        </aside>
+          </aside>
+        ) : null}
       </div>
 
       {showProfileModal ? (
@@ -731,11 +656,10 @@ export default function HomePage() {
                 <div className="flex gap-2">
                   <button
                     onClick={() => setProfileEditMode((prev) => !prev)}
-                    className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
-                      profileEditMode
+                    className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${profileEditMode
                         ? "bg-slate-100 text-slate-700 hover:bg-slate-200"
                         : "bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow-lg hover:-translate-y-0.5"
-                    }`}
+                      }`}
                   >
                     {profileEditMode ? "Xem hồ sơ" : "Cập nhật"}
                   </button>
@@ -836,9 +760,8 @@ export default function HomePage() {
                     <button
                       key={item.key}
                       onClick={() => setSettingsTab(item.key as SettingsTab)}
-                      className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition ${
-                        settingsTab === item.key ? "bg-emerald-100 font-semibold text-emerald-900" : "text-slate-600 hover:bg-slate-200"
-                      }`}
+                      className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition ${settingsTab === item.key ? "bg-emerald-100 font-semibold text-emerald-900" : "text-slate-600 hover:bg-slate-200"
+                        }`}
                     >
                       <Icon size={16} />
                       {item.label}
