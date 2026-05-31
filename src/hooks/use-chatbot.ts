@@ -270,7 +270,7 @@ export function useChatbot({
     setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
-  const showQuickReplies = messages.length <= 2 && !isSending;
+  const showQuickReplies = !messages.some((m) => m.isUser) && !isSending;
 
   return {
     messages,

@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { IMessage, ReactionType } from "@/src/types/message";
 import { sanitizeMessageHtml, plainTextFromHtml } from "@/src/lib/sanitize";
 import { formatMessageTime, getStatusIconLabel } from "@/src/lib/messages";
 import { t, ChatLocale } from "@/src/lib/i18n/chat";
-import { MessageActions } from "@/src/components/chat/MessageActions";
+import { MessageHoverToolbar } from "@/src/components/chat/MessageHoverToolbar";
+import { MessageMoreMenu } from "@/src/components/chat/MessageMoreMenu";
+import { MessageReactionPopover } from "@/src/components/chat/MessageReactionPopover";
 import { Check, CheckCheck } from "lucide-react";
 
 interface MessageItemProps {
@@ -14,22 +16,22 @@ interface MessageItemProps {
   showAvatar?: boolean;
   replyPreview?: string;
   locale?: ChatLocale;
-  selectionMode?: boolean;
-  selected?: boolean;
   onReply: () => void;
   onEdit?: () => void;
-  onDelete: () => void;
+  onDeleteForMe: () => void;
+  onRecall?: () => void;
   onForward?: () => void;
   onReact: (type: ReactionType) => void;
   onRetry?: () => void;
-  onToggleSelect?: () => void;
   avatar?: string;
   hideAvatarSpace?: boolean;
   fullWidth?: boolean;
   senderName?: string;
   onJumpToReply?: () => void;
   isHighlighted?: boolean;
+  isPinned?: boolean;
   onPin?: () => void;
+  onUnpin?: () => void;
 }
 
 export function MessageItem({
@@ -38,24 +40,83 @@ export function MessageItem({
   showAvatar,
   replyPreview,
   locale = "vi",
-  selectionMode,
-  selected,
   onReply,
   onEdit,
-  onDelete,
+  onDeleteForMe,
+  onRecall,
   onForward,
   onReact,
   onRetry,
-  onToggleSelect,
   avatar,
   hideAvatarSpace,
   fullWidth,
   senderName,
   onJumpToReply,
   isHighlighted,
+  isPinned = false,
   onPin,
+  onUnpin,
 }: MessageItemProps) {
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [reactionOpen, setReactionOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
+
+  const toolbarVisible = hovered || menuOpen || reactionOpen;
+  /** Menu căn dưới nút ⋮ (ngoài cùng trái với tin mình, ngoài cùng phải với tin người khác) */
+  const menuAlign = isMine ? "left" : "right";
+
+  const renderToolbar = (dotsOnEnd: boolean, canRecall: boolean) => (
+    <div ref={toolbarRef} className="relative shrink-0 self-center">
+      <MessageHoverToolbar
+        visible={toolbarVisible}
+        dotsOnEnd={dotsOnEnd}
+        moreActive={menuOpen}
+        onMore={() => {
+          setReactionOpen(false);
+          setMenuOpen((v) => !v);
+        }}
+        onReply={() => {
+          setMenuOpen(false);
+          setReactionOpen(false);
+          onReply();
+        }}
+        onReaction={() => {
+          setMenuOpen(false);
+          setReactionOpen((v) => !v);
+        }}
+      />
+      <MessageMoreMenu
+        open={menuOpen}
+        anchorRef={toolbarRef}
+        align={menuAlign}
+        locale={locale}
+        isMine={isMine}
+        isPinned={isPinned}
+        canRecall={canRecall}
+        onClose={() => {
+          setMenuOpen(false);
+          setHovered(false);
+        }}
+        onEdit={onEdit}
+        onRecall={onRecall}
+        onForward={onForward ?? (() => undefined)}
+        onPin={onPin}
+        onUnpin={onUnpin}
+        onDeleteForMe={onDeleteForMe}
+      />
+      <MessageReactionPopover
+        open={reactionOpen}
+        anchorRef={toolbarRef}
+        align={menuAlign}
+        onClose={() => {
+          setReactionOpen(false);
+          setHovered(false);
+        }}
+        onReact={onReact}
+      />
+    </div>
+  );
 
   if (message.isRecalled) {
     return (
@@ -89,18 +150,8 @@ export function MessageItem({
       role="listitem"
       aria-label={`Tin nhắn ${isMine ? "của bạn" : "đối phương"}`}
     >
-      {selectionMode && (
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={onToggleSelect}
-          className="mt-2"
-          aria-label="Chọn tin nhắn"
-        />
-      )}
-
       {!isMine && showAvatar && !hideAvatarSpace && (
-        <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gradient-to-br from-zalo-blue to-blue-700">
+        <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gradient-to-br from-[var(--qc-primary-dark)] to-[var(--qc-primary)]">
           {avatar ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={avatar} alt="" className="h-full w-full object-cover" />
@@ -113,7 +164,16 @@ export function MessageItem({
       )}
       {!isMine && !showAvatar && !hideAvatarSpace && <div className="w-8 shrink-0" aria-hidden />}
 
-      <div className={`relative ${fullWidth ? "w-full" : "max-w-[75%] sm:max-w-[65%]"} ${isMine ? "items-end" : "items-start"} flex flex-col`}>
+      <div
+        className={`relative ${fullWidth ? "w-full" : "max-w-[75%] sm:max-w-[65%]"} ${isMine ? "items-end" : "items-start"} flex flex-col`}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => {
+          if (!menuOpen && !reactionOpen) setHovered(false);
+        }}
+      >
+        {!isMine && senderName && showAvatar ? (
+          <p className="mb-1 max-w-full truncate pl-1 text-[11px] text-[var(--qc-text-secondary)]">{senderName}</p>
+        ) : null}
         {replyPreview && (
           <button
             type="button"
@@ -124,21 +184,23 @@ export function MessageItem({
           </button>
         )}
 
-        <div
-          className={`relative rounded-2xl px-3 py-2 text-sm shadow-sm animate-message-in ${
-            isMine
-              ? "rounded-br-md bg-chat-bubble-user text-gray-900"
-              : "rounded-bl-md bg-chat-bubble text-gray-900"
-          }`}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setMenuOpen(true);
-          }}
-        >
-          {renderBody(message, safeContent, isCallMeta, locale)}
-          {message.editedAt && (
-            <span className="ml-1 text-[10px] text-gray-400">({t("edited", locale)})</span>
-          )}
+        <div className="flex max-w-full items-center gap-1.5">
+          {isMine ? renderToolbar(false, isMine && !message.isRecalled && Boolean(onRecall)) : null}
+
+          <div
+            className={`relative min-w-0 rounded-2xl px-3 py-2 text-sm shadow-sm animate-message-in ${
+              isMine
+                ? "rounded-br-md bg-[var(--qc-primary)] text-white"
+                : "rounded-bl-md border border-[var(--qc-divider)] bg-white text-[var(--qc-text-primary)]"
+            }`}
+          >
+            {renderBody(message, safeContent, isCallMeta, locale)}
+            {message.editedAt && (
+              <span className="ml-1 text-[10px] text-gray-400">({t("edited", locale)})</span>
+            )}
+          </div>
+
+          {!isMine ? renderToolbar(true, false) : null}
         </div>
 
         {message.reactions.length > 0 && (
@@ -161,58 +223,6 @@ export function MessageItem({
           )}
         </div>
 
-        {menuOpen && (
-          <div className="absolute z-20 top-0 right-0">
-            <MessageActions
-              locale={locale}
-              isMine={isMine}
-              onReply={() => {
-                setMenuOpen(false);
-                onReply();
-              }}
-              onEdit={
-                onEdit
-                  ? () => {
-                      setMenuOpen(false);
-                      onEdit();
-                    }
-                  : undefined
-              }
-              onDelete={() => {
-                setMenuOpen(false);
-                onDelete();
-              }}
-              onForward={
-                onForward
-                  ? () => {
-                      setMenuOpen(false);
-                      onForward();
-                    }
-                  : undefined
-              }
-              onPin={
-                onPin && message.type === "TEXT"
-                  ? () => {
-                      setMenuOpen(false);
-                      onPin();
-                    }
-                  : undefined
-              }
-              onReact={(type) => {
-                setMenuOpen(false);
-                onReact(type);
-              }}
-              onSelect={
-                onToggleSelect
-                  ? () => {
-                      setMenuOpen(false);
-                      onToggleSelect();
-                    }
-                  : undefined
-              }
-            />
-          </div>
-        )}
       </div>
     </div>
   );

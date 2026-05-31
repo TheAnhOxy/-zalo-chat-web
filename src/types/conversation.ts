@@ -3,6 +3,17 @@ import { IMessage, MessageType } from "@/src/types/message";
 /** Matches mobile ConversationModel.type: PRIVATE | GROUP */
 export type ConversationType = "PRIVATE" | "GROUP";
 
+export type GroupMemberRole = "ADMIN" | "MODERATOR" | "MEMBER";
+
+export interface IGroupSettings {
+  allowInviteLink?: boolean;
+  joinQrCode?: string;
+  isLockChat?: boolean;
+  chatBackgroundType?: "PRESET" | "CUSTOM";
+  chatBackgroundIndex?: number;
+  chatBackgroundCustomBase64?: string;
+}
+
 export interface IConversationParticipant {
   userId: string;
   fullName: string;
@@ -11,12 +22,15 @@ export interface IConversationParticipant {
   lastSeen?: string | Date;
   isBlocked?: boolean;
   isPinned?: boolean;
+  role?: GroupMemberRole;
 }
 
 export interface IConversation {
   _id: string;
   type: ConversationType;
   name?: string;
+  description?: string;
+  groupSettings?: IGroupSettings;
   avatar?: string;
   participants: IConversationParticipant[];
   lastMessage?: Pick<IMessage, "_id" | "content" | "type" | "senderId" | "createdAt">;

@@ -115,6 +115,32 @@ export const contactsService = {
     return apiClient.post(`/friendships`, { requesterId, addresseeId: receiverId, message });
   },
 
+  /** Quan hệ giữa hai user (giống mobile getFriendshipBetween). */
+  async getFriendshipBetween(
+    myUserId: string,
+    otherUserId: string
+  ): Promise<{ id: string; status: string } | null> {
+    if (!myUserId || !otherUserId) return null;
+    try {
+      const res = await apiClient.get<{ _id?: string; id?: string; requesterId: string; addresseeId: string; status: string }[]>(
+        `/friendships/user/${myUserId}`
+      );
+      for (const f of res.data) {
+        const rid = String(f.requesterId);
+        const aid = String(f.addresseeId);
+        const match =
+          (rid === myUserId && aid === otherUserId) || (rid === otherUserId && aid === myUserId);
+        if (!match) continue;
+        const id = String(f._id ?? f.id ?? "");
+        if (!id) continue;
+        return { id, status: f.status };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  },
+
   createGroup(name: string, memberIds: string[], creatorId: string, avatar?: string) {
     const members = memberIds.map((id) => ({
       userId: id,

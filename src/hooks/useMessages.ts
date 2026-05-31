@@ -289,13 +289,27 @@ export function useMessages(conversationId: string | undefined, currentUserId: s
     [conversationId]
   );
 
-  const deleteMessage = useCallback(
+  const recallMessage = useCallback(
     async (messageId: string) => {
       if (!conversationId) return;
       socketRef.current?.recallMessage(messageId, conversationId);
       useChatStore.getState().updateMessage(conversationId, messageId, { isRecalled: true });
+      const editingId = useChatStore.getState().ui.editingId;
+      if (editingId === messageId) useChatStore.getState().setUi({ editingId: null });
     },
     [conversationId]
+  );
+
+  const deleteMessageForMe = useCallback(
+    async (messageId: string) => {
+      if (!conversationId || !currentUserId) return;
+      socketRef.current?.deleteMessageForMe(messageId);
+      useChatStore.getState().removeMessage(conversationId, messageId);
+      const { replyToId, editingId } = useChatStore.getState().ui;
+      if (replyToId === messageId) useChatStore.getState().setUi({ replyToId: null });
+      if (editingId === messageId) useChatStore.getState().setUi({ editingId: null });
+    },
+    [conversationId, currentUserId]
   );
 
   const markSeen = useCallback(() => {
@@ -323,7 +337,8 @@ export function useMessages(conversationId: string | undefined, currentUserId: s
     sendText,
     sendWithAttachment,
     editMessage,
-    deleteMessage,
+    recallMessage,
+    deleteMessageForMe,
     markSeen,
     retryFailed,
     socket: socketRef,
