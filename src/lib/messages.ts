@@ -199,13 +199,11 @@ export function formatLastMessagePreview(
   if (raw.startsWith("UNPIN_MESSAGE|")) return "Đã bỏ ghim một tin nhắn";
 
   const normalizedType = (options?.type ?? "").toUpperCase() as IMessage["type"];
-  if (
-    ATTACHMENT_TYPES.has(normalizedType) ||
-    isImageUrl(raw) ||
-    isVideoUrl(raw)
-  ) {
-    return "Đã gửi 1 tệp đính kèm";
-  }
+  if (normalizedType === "IMAGE" || isImageUrl(raw)) return "Đã gửi 1 ảnh";
+  if (normalizedType === "VIDEO" || isVideoUrl(raw)) return "Đã gửi 1 video";
+  if (normalizedType === "VOICE") return "Đã gửi 1 tin nhắn thoại";
+  if (normalizedType === "FILE") return "Đã gửi 1 file";
+  if (ATTACHMENT_TYPES.has(normalizedType)) return "Đã gửi 1 tệp đính kèm";
 
   const text = raw || "Chưa có tin nhắn";
   const isMe =

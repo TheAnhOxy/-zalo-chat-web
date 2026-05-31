@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/src/components/providers/auth-provider";
 import { useConversation } from "@/src/hooks/useConversation";
 import { useMessages } from "@/src/hooks/useMessages";
@@ -11,33 +12,61 @@ import { ChatHeader } from "@/src/components/chat/ChatHeader";
 import { MessageList } from "@/src/components/chat/MessageList";
 import { Composer } from "@/src/components/chat/Composer";
 import { TypingIndicator } from "@/src/components/chat/TypingIndicator";
+import { MessageSearchPanel } from "@/src/components/chat/MessageSearchPanel";
+import { ForwardMessageModal } from "@/src/components/chat/ForwardMessageModal";
+import { buildForwardMetadata } from "@/src/lib/forward-message";
 import { useChatStore } from "@/src/store/chat-store";
 import { IMessage, ReactionType } from "@/src/types/message";
 import { t } from "@/src/lib/i18n/chat";
 import { PageLoader } from "@/src/components/ui/page-state";
 import { ChatOptionsPanel } from "@/src/components/chat/ChatOptionsPanel";
-import { useChatTheme, ChatTheme } from "@/src/hooks/useChatTheme";
+import { useConversationBackground } from "@/src/hooks/useConversationBackground";
+import { conversationsApi } from "@/src/services/api/conversations";
+import { conversationGroupApi } from "@/src/services/api/conversation-group";
+import { socketService } from "@/src/services/socket/socket.service";
+import { GROUP_BG_LABELS, clampGroupBgIndex } from "@/src/lib/group-chat-backgrounds";
+import { useToast } from "@/src/components/providers/toast-provider";
+import {
+  getConversationAvatarUrl,
+  getConversationDisplayName,
+} from "@/src/lib/conversation-display";
+import { profileCacheForUser, usePeerProfile } from "@/src/hooks/usePeerProfile";
 
 interface ChatWindowProps {
   conversationId: string;
+  onConversationLeft?: () => void;
+  onConversationUpdated?: () => void;
 }
 
-export function ChatWindow({ conversationId }: ChatWindowProps) {
+export function ChatWindow({
+  conversationId,
+  onConversationLeft,
+  onConversationUpdated,
+}: ChatWindowProps) {
   const { user } = useAuth();
   const userId = user?._id;
   const locale = useChatStore((s) => s.ui.locale);
 
-  const { conversation, isLoading, otherParticipant, isBlocked } = useConversation(conversationId);
+  const { conversation, isLoading, otherParticipant, isBlocked, refetch } =
+    useConversation(conversationId);
   const other = userId ? otherParticipant(userId) : null;
   const { presence } = usePresence(other?.userId);
 
-  const { theme, setTheme, themeClass } = useChatTheme(conversationId);
+  const { showToast } = useToast();
+  const bg = useConversationBackground(conversationId, conversation ?? null);
 
-  const handleThemeToggle = useCallback(() => {
-    const themes: ChatTheme[] = ["default", "sky", "mint", "sunset"];
-    const currentIndex = themes.indexOf(theme);
-    setTheme(themes[(currentIndex + 1) % themes.length]);
-  }, [theme, setTheme]);
+  const [optionsFocusWallpaper, setOptionsFocusWallpaper] = useState(false);
+  const [showOptions, setShowOptions] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [jumpToMessageId, setJumpToMessageId] = useState<string | null>(null);
+  const [showForwardModal, setShowForwardModal] = useState(false);
+  const [forwardMessageIds, setForwardMessageIds] = useState<string[]>([]);
+
+  const conversationsQuery = useQuery({
+    queryKey: ["conversations", userId],
+    queryFn: () => conversationsApi.listForUser(userId!),
+    enabled: Boolean(userId && showForwardModal),
+  });
 
   const {
     messages,
@@ -48,7 +77,8 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
     sendText,
     sendWithAttachment,
     editMessage,
-    deleteMessage,
+    recallMessage,
+    deleteMessageForMe,
     markSeen,
     retryFailed,
     socket,
@@ -59,15 +89,7 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
   const attachments = useAttachments();
   const replyToId = useChatStore((s) => s.ui.replyToId);
   const editingId = useChatStore((s) => s.ui.editingId);
-  const searchQuery = useChatStore((s) => s.ui.searchQuery);
   const setUi = useChatStore((s) => s.setUi);
-  const clearSelection = useChatStore((s) => s.clearSelection);
-  const selectionMode = useChatStore((s) => s.ui.selectionMode);
-  const selectedIds = useChatStore((s) => s.ui.selectedIds);
-
-  const [showOptions, setShowOptions] = useState(false);
-  const [showSearch, setShowSearch] = useState(false);
-  const [searchInput, setSearchInput] = useState("");
 
   const replyTo = useMemo(
     () => (replyToId ? messages.find((m) => m._id === replyToId) : null),
@@ -79,9 +101,18 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
   );
 
   const isGroup = conversation?.type === "GROUP";
-  const title = isGroup 
-    ? (conversation?.name || t("chatTitle", locale))
-    : (other?.fullName || t("chatTitle", locale));
+  const otherId = other?.userId;
+  const { data: peerUser } = usePeerProfile(otherId, Boolean(conversation && !isGroup));
+  const peerProfiles = profileCacheForUser(otherId, peerUser);
+
+  const title =
+    conversation && userId
+      ? getConversationDisplayName(conversation, userId, peerProfiles)
+      : isGroup
+        ? "Nhóm"
+        : "Người dùng";
+  const headerAvatar =
+    conversation && userId ? getConversationAvatarUrl(conversation, userId, peerProfiles) : undefined;
 
   const handleSend = useCallback(
     async (text: string) => {
@@ -114,7 +145,6 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
 
   const handleVoiceRecorded = useCallback(
     async (file: File) => {
-      // Just upload the voice file directly
       await sendWithAttachment(file, "VOICE", replyTo?._id);
     },
     [sendWithAttachment, replyTo]
@@ -127,29 +157,42 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
     [socket, conversationId]
   );
 
-  const handleBulkDelete = useCallback(async () => {
-    for (const id of selectedIds) {
-      await deleteMessage(id);
-    }
-    clearSelection();
-  }, [selectedIds, deleteMessage, clearSelection]);
+  const forwardMessages = useCallback(
+    async (targetConversationId: string, msgs: IMessage[]) => {
+      if (!userId) return;
+      for (const msg of msgs) {
+        const metadata = buildForwardMetadata(msg);
+        socket.current?.sendMessage({
+          conversationId: targetConversationId,
+          senderId: userId,
+          type: msg.type,
+          content: msg.content,
+          ...(metadata ? { metadata } : {}),
+        });
+      }
+      setForwardMessageIds([]);
+      showToast("Đã chuyển tiếp tin nhắn");
+    },
+    [userId, socket, showToast]
+  );
 
-  const handleBulkForward = useCallback(() => {
-    const targetId = prompt("Nhập ID hội thoại đích:");
-    if (!targetId || !userId) return;
-    for (const messageId of selectedIds) {
-      const msg = messages.find((m) => m._id === messageId);
-      if (!msg) continue;
-      socket.current?.sendMessage({
-        conversationId: targetId,
-        senderId: userId,
-        type: msg.type,
-        content: msg.content,
-        metadata: msg.metadata,
-      });
-    }
-    clearSelection();
-  }, [selectedIds, messages, userId, clearSelection, socket]);
+  const openForwardModal = useCallback((messageIds: string[]) => {
+    if (!messageIds.length) return;
+    setForwardMessageIds(messageIds);
+    setShowForwardModal(true);
+  }, []);
+
+  const handleForwardOne = useCallback(
+    (messageId: string) => {
+      openForwardModal([messageId]);
+    },
+    [openForwardModal]
+  );
+
+  const handleJumpToMessage = useCallback((messageId: string) => {
+    setJumpToMessageId(messageId);
+    setTimeout(() => setJumpToMessageId(null), 100);
+  }, []);
 
   useEffect(() => {
     if (!userId) return;
@@ -159,13 +202,99 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
     if (hasUnreadFromPeer) markSeen();
   }, [messages.length, userId, markSeen]);
 
-  const handlePin = useCallback((messageId: string) => {
-    socket.current?.pinMessage(messageId, conversationId);
-  }, [conversationId, socket]);
+  const handleRecall = useCallback(
+    async (messageId: string) => {
+      await recallMessage(messageId);
+      showToast("Đã thu hồi tin nhắn");
+    },
+    [recallMessage, showToast]
+  );
 
-  const handleUnpin = useCallback((messageId: string) => {
-    socket.current?.unpinMessage(messageId, conversationId);
-  }, [conversationId, socket]);
+  const handleDeleteForMe = useCallback(
+    async (messageId: string) => {
+      await deleteMessageForMe(messageId);
+      showToast("Đã xóa tin nhắn phía bạn");
+    },
+    [deleteMessageForMe, showToast]
+  );
+
+  const handlePin = useCallback(
+    (messageId: string) => {
+      socket.current?.pinMessage(messageId, conversationId);
+      showToast("Đã ghim tin nhắn");
+    },
+    [conversationId, socket, showToast]
+  );
+
+  const handleUnpin = useCallback(
+    (messageId: string) => {
+      socket.current?.unpinMessage(messageId, conversationId);
+      showToast("Đã bỏ ghim tin nhắn");
+    },
+    [conversationId, socket, showToast]
+  );
+
+  const closeSearch = useCallback(() => {
+    setShowSearch(false);
+    setUi({ searchQuery: "" });
+  }, [setUi]);
+
+  useEffect(() => {
+    const handler = (payload: Record<string, unknown>) => {
+      const cid = String(payload.conversationId ?? payload._id ?? "");
+      if (cid === conversationId) {
+        void refetch();
+        bg.refreshBackground();
+      }
+    };
+    socketService.on("conversation_updated", handler);
+    return () => {
+      socketService.off("conversation_updated", handler);
+    };
+  }, [conversationId, refetch, bg]);
+
+  const handleGroupPreset = useCallback(
+    async (index: number, applyForAll: boolean) => {
+      if (applyForAll) {
+        await conversationGroupApi.updateGroupChatBackground(conversationId, {
+          type: "PRESET",
+          index: clampGroupBgIndex(index),
+        });
+        bg.clearGroupOverride();
+        await refetch();
+        showToast("Đã áp dụng hình nền cho tất cả thành viên");
+      } else {
+        bg.applyLocalGroupPreset(index);
+        showToast(`Đã đặt nền: ${GROUP_BG_LABELS[clampGroupBgIndex(index)]}`);
+      }
+      bg.refreshBackground();
+    },
+    [conversationId, bg, refetch, showToast]
+  );
+
+  const handleGroupCustom = useCallback(
+    async (base64: string, applyForAll: boolean) => {
+      if (applyForAll) {
+        await conversationGroupApi.updateGroupChatBackground(conversationId, {
+          type: "CUSTOM",
+          index: 0,
+          customBase64: base64,
+        });
+        bg.clearGroupOverride();
+        await refetch();
+        showToast("Đã áp dụng hình nền cho tất cả thành viên");
+      } else {
+        bg.applyLocalGroupCustom(base64);
+        showToast("Đã đặt nền: Ảnh từ thiết bị");
+      }
+      bg.refreshBackground();
+    },
+    [conversationId, bg, refetch, showToast]
+  );
+
+  const selectedGroupBgIndex = clampGroupBgIndex(
+    conversation?.groupSettings?.chatBackgroundIndex ?? 0
+  );
 
   if (isLoading && !conversation) {
     return <PageLoader />;
@@ -175,32 +304,35 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
     <div className="relative flex h-full min-h-0 flex-col">
       <ChatHeader
         title={title}
+        avatarName={title}
+        avatarUrl={headerAvatar}
+        isGroup={isGroup}
+        memberCount={conversation?.participants.length ?? 0}
         participant={other ?? undefined}
         presence={presence}
         locale={locale}
+        showWallpaper={false}
+        showCalls={!isGroup}
+        callHref={!isGroup ? `/call/${conversationId}` : undefined}
         onSearchToggle={() => setShowSearch((v) => !v)}
-        onThemeToggle={handleThemeToggle}
-        onOptionsOpen={() => setShowOptions(true)}
-        callHref={other ? `/call/${conversationId}` : undefined}
+        onInfo={() => {
+          setOptionsFocusWallpaper(false);
+          setShowOptions(true);
+        }}
       />
 
-      {showSearch && (
-        <div className="border-b px-3 py-2">
-          <input
-            type="search"
-            value={searchInput}
-            onChange={(e) => {
-              setSearchInput(e.target.value);
-              setUi({ searchQuery: e.target.value });
-            }}
-            placeholder={t("searchInChat", locale)}
-            className="w-full rounded-lg border px-3 py-1.5 text-sm"
-            aria-label={t("searchInChat", locale)}
-          />
-        </div>
-      )}
+      <MessageSearchPanel
+        open={showSearch}
+        onClose={closeSearch}
+        messages={messages}
+        locale={locale}
+        onJumpToMessage={handleJumpToMessage}
+      />
 
-      <div className={`flex-1 overflow-hidden flex flex-col ${themeClass}`}>
+      <div
+        className={`flex flex-1 flex-col overflow-hidden ${bg.background.backgroundClass}`}
+        style={bg.background.backgroundStyle}
+      >
         <MessageList
           messages={messages}
           currentUserId={userId!}
@@ -209,12 +341,14 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
           locale={locale}
           hasMore={hasMore}
           loading={loading}
-          searchQuery={searchQuery}
+          jumpToMessageId={jumpToMessageId}
           onLoadOlder={loadOlder}
           onReply={(m) => setUi({ replyToId: m._id, editingId: null })}
           onEdit={(m) => setUi({ editingId: m._id, replyToId: null })}
-          onDelete={deleteMessage}
-          onForward={() => setUi({ selectionMode: true })}
+          onDeleteForMe={(id) => void handleDeleteForMe(id)}
+          onRecall={(id) => void handleRecall(id)}
+          onForward={handleForwardOne}
+          allowEdit={!isGroup}
           onReact={handleReact}
           onRetry={retryFailed}
           onPin={handlePin}
@@ -222,24 +356,10 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
         />
 
         <TypingIndicator
-          names={othersTyping.map(() => other?.fullName ?? "User")}
+          names={othersTyping.map(() => (isGroup ? "Ai đó" : other?.fullName || "Người dùng"))}
           locale={locale}
         />
       </div>
-
-      {selectionMode && (
-        <div className="flex gap-2 border-t bg-white px-3 py-2">
-          <button type="button" className="text-sm text-red-600" onClick={handleBulkDelete}>
-            {t("delete", locale)}
-          </button>
-          <button type="button" className="text-sm text-zalo-blue" onClick={handleBulkForward}>
-            {t("forward", locale)}
-          </button>
-          <button type="button" className="text-sm" onClick={clearSelection}>
-            {t("cancel", locale)}
-          </button>
-        </div>
-      )}
 
       <Composer
         locale={locale}
@@ -263,14 +383,46 @@ export function ChatWindow({ conversationId }: ChatWindowProps) {
           onClose={() => setShowOptions(false)}
           conversation={conversation}
           currentUserId={userId}
-          peerName={other?.fullName || title}
+          peerName={other?.fullName?.trim() || title}
           peerId={other?.userId}
-          theme={theme}
-          onThemeChange={setTheme}
-          onSearchMessages={() => setShowSearch(true)}
+          privateTheme={bg.privateTheme}
+          onPrivateThemeChange={bg.setPrivateChatTheme}
+          selectedGroupBgIndex={selectedGroupBgIndex}
+          onSelectGroupPreset={handleGroupPreset}
+          onSelectGroupCustom={handleGroupCustom}
+          onSearchMessages={() => {
+            setShowSearch(true);
+            setShowOptions(false);
+          }}
+          onOpenPinnedMessage={handleJumpToMessage}
+          onUnpinMessage={handleUnpin}
           onHistoryDeleted={loadInitial}
+          onMemberKicked={loadInitial}
+          currentUserDisplayName={user?.fullName?.trim() || "Bạn"}
+          onConversationUpdated={() => {
+            void refetch();
+            onConversationUpdated?.();
+          }}
+          onLeftGroup={onConversationLeft}
+          openWallpaperSection={optionsFocusWallpaper}
         />
       )}
+
+      {userId && showForwardModal ? (
+        <ForwardMessageModal
+          open={showForwardModal}
+          onClose={() => {
+            setShowForwardModal(false);
+            setForwardMessageIds([]);
+          }}
+          conversations={conversationsQuery.data ?? []}
+          currentUserId={userId}
+          currentConversationId={conversationId}
+          messageIds={forwardMessageIds}
+          messages={messages}
+          onForward={forwardMessages}
+        />
+      ) : null}
     </div>
   );
 }

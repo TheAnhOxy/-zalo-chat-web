@@ -1,4 +1,4 @@
-import { IConversation, IConversationParticipant } from "@/src/types/conversation";
+import { IConversation, IConversationParticipant, IGroupSettings } from "@/src/types/conversation";
 import { IMessage, IReaction, ISeenBy, MessageType } from "@/src/types/message";
 import { IUserPresence } from "@/src/types/presence";
 import { normalizeMessage } from "@/src/lib/messages";
@@ -71,12 +71,15 @@ export function parseConversationFromApi(raw: Record<string, unknown>): IConvers
     
     return {
       userId: extractId(user.userId ?? user._id ?? item.userId ?? item._id),
-      fullName: String(user.name ?? user.fullName ?? user.nickname ?? item.name ?? item.fullName ?? "").trim(),
+      fullName: String(
+        user.name ?? user.fullName ?? user.nickname ?? item.name ?? item.fullName ?? item.nickname ?? ""
+      ).trim(),
       avatar: (user.avatar ?? item.avatar) ? String(user.avatar ?? item.avatar) : undefined,
       isOnline: Boolean(user.isOnline ?? item.isOnline ?? (user.status as { isOnline?: unknown } | undefined)?.isOnline),
       lastSeen: (user.lastSeen ?? item.lastSeen) ? String(user.lastSeen ?? item.lastSeen) : undefined,
       isBlocked: Boolean(user.isBlocked ?? item.isBlocked),
       isPinned: Boolean(user.isPinned ?? item.isPinned),
+      role: item.role ? (String(item.role) as IConversationParticipant["role"]) : undefined,
     } satisfies IConversationParticipant;
   });
 
@@ -106,10 +109,28 @@ export function parseConversationFromApi(raw: Record<string, unknown>): IConvers
     console.error("Failed to parse pinned messages fallback", e);
   }
 
+  const gsRaw = raw.groupSettings as Record<string, unknown> | undefined;
+  let groupSettings: IGroupSettings | undefined;
+  if (gsRaw && typeof gsRaw === "object") {
+    groupSettings = {
+      allowInviteLink: gsRaw.allowInviteLink as boolean | undefined,
+      joinQrCode: gsRaw.joinQrCode != null ? String(gsRaw.joinQrCode) : undefined,
+      isLockChat: gsRaw.isLockChat as boolean | undefined,
+      chatBackgroundType: (gsRaw.chatBackgroundType as IGroupSettings["chatBackgroundType"]) ?? "PRESET",
+      chatBackgroundIndex: Number(gsRaw.chatBackgroundIndex ?? 0),
+      chatBackgroundCustomBase64:
+        gsRaw.chatBackgroundCustomBase64 != null
+          ? String(gsRaw.chatBackgroundCustomBase64)
+          : undefined,
+    };
+  }
+
   return {
     _id: rawId,
     type: type === "GROUP" ? "GROUP" : "PRIVATE",
     name: raw.name ? String(raw.name).trim() : undefined,
+    description: raw.description != null ? String(raw.description).trim() : undefined,
+    groupSettings,
     avatar: raw.avatar ? String(raw.avatar) : undefined,
     participants: members,
     lastMessage: lastMessageRaw

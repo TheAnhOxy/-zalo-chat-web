@@ -15,7 +15,7 @@ export default function RootLayout({
   return (
     <html lang="vi" suppressHydrationWarning>
       {/* Thêm class "dark" vào body nếu bạn muốn test giao diện tối luôn */}
-      <body className="antialiased" suppressHydrationWarning>
+      <body className="font-sans font-normal antialiased" suppressHydrationWarning>
         <AppProvider>{children}</AppProvider>
       </body>
     </html>

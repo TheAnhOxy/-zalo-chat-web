@@ -1,7 +1,8 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { Send, Mic, Square, Trash, ThumbsUp } from "lucide-react";
+import { Send, Square, Trash, ThumbsUp, Smile } from "lucide-react";
+import { EmojiPicker } from "@/src/components/chat/EmojiPicker";
 import { t, ChatLocale } from "@/src/lib/i18n/chat";
 import { AttachmentPicker } from "@/src/components/chat/AttachmentPicker";
 import { AttachmentUploadState } from "@/src/hooks/useAttachments";
@@ -40,6 +41,7 @@ export function Composer({
   onVoiceRecorded,
 }: ComposerProps) {
   const [text, setText] = useState(editingMessage?.content ?? "");
+  const [showEmoji, setShowEmoji] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const { isRecording, recordingDuration, startRecording, stopRecording, cancelRecording } = useVoiceRecorder();
 
@@ -79,9 +81,9 @@ export function Composer({
   }
 
   return (
-    <footer className="border-t bg-white">
+    <footer className="shrink-0 border-t border-[var(--qc-divider)] bg-[var(--qc-card)]">
       {(replyTo || editingMessage) && (
-        <div className="flex items-center justify-between border-b bg-zalo-light/50 px-3 py-2 text-xs">
+        <div className="flex items-center justify-between border-b border-[var(--qc-divider)] bg-[var(--qc-primary-light)]/50 px-3 py-2 text-xs text-[var(--qc-text-primary)]">
           <span className="truncate">
             {editingMessage ? t("edit", locale) : t("reply", locale)}:{" "}
             {(replyTo ?? editingMessage)?.content?.slice(0, 60)}
@@ -97,9 +99,26 @@ export function Composer({
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="flex items-end gap-2 px-2 py-2">
+      <EmojiPicker
+        open={showEmoji && !isRecording}
+        onPick={(emoji) => {
+          setText((prev) => prev + emoji);
+          inputRef.current?.focus();
+        }}
+      />
+
+      <form onSubmit={handleSubmit} className="flex items-end gap-1 px-2.5 py-2.5">
         {!isRecording && (
-          <AttachmentPicker
+          <>
+            <button
+              type="button"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--qc-primary)] hover:bg-[var(--qc-primary-light)]"
+              onClick={() => setShowEmoji((v) => !v)}
+              aria-label="Biểu tượng cảm xúc"
+            >
+              <Smile className="h-5 w-5" />
+            </button>
+            <AttachmentPicker
             locale={locale}
             disabled={disabled}
             uploads={uploads}
@@ -109,6 +128,7 @@ export function Composer({
               if (onVoiceRecorded) void startRecording();
             }}
           />
+          </>
         )}
 
         {isRecording ? (
@@ -163,8 +183,8 @@ export function Composer({
           }}
           className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors ${
             text.trim() || isRecording
-              ? "bg-zalo-blue text-white hover:bg-zalo-dark focus-visible:ring-2 focus-visible:ring-zalo-blue"
-              : "bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-zalo-blue"
+              ? "bg-[var(--qc-primary)] text-white hover:brightness-95 focus-visible:ring-2 focus-visible:ring-[var(--qc-primary)]"
+              : "text-[var(--qc-primary)] hover:bg-[var(--qc-primary-light)]"
           } disabled:opacity-50`}
           aria-label={isRecording ? t("send", locale) : text.trim() ? t("send", locale) : "Gửi Like"}
         >

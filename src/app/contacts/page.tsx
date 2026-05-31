@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { Suspense, useState, useMemo, useCallback, useEffect } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useAuthGuard } from "@/src/hooks/use-auth-guard";
 import { useFriends, useGroups, usePendingRequestCount } from "@/src/hooks/use-contacts";
 import { useQueryClient } from "@tanstack/react-query";
@@ -19,11 +20,23 @@ import {
 import { AppNavSidebar } from "@/src/components/layout/app-nav-sidebar";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 
 type Tab = "FRIENDS" | "GROUPS";
 type GroupSortMode = "RECENT" | "NAME" | "ADMIN";
 type FriendFilter = "ALL" | "RECENT";
+
+/** Chuyển hướng `/contacts?user=id` → `/contacts/user/id` (link cũ từ chat/nhóm). */
+function ContactsUserQueryRedirect() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const userId = searchParams.get("user");
+
+  useEffect(() => {
+    if (userId) router.replace(`/contacts/user/${userId}`);
+  }, [userId, router]);
+
+  return null;
+}
 
 export default function ContactsPage() {
   const auth = useAuthGuard();
@@ -148,6 +161,9 @@ export default function ContactsPage() {
 
   return (
     <main className="h-screen overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-amber-50 text-slate-800">
+      <Suspense fallback={null}>
+        <ContactsUserQueryRedirect />
+      </Suspense>
       <div className="h-full w-full md:grid md:grid-cols-[72px_330px_1fr]">
 
         <AppNavSidebar activeTab="contacts" />

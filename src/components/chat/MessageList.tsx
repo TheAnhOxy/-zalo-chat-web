@@ -19,11 +19,15 @@ interface MessageListProps {
   hasMore: boolean;
   loading: boolean;
   searchQuery?: string;
+  jumpToMessageId?: string | null;
   onLoadOlder: () => void;
   onReply: (message: IMessage) => void;
   onEdit: (message: IMessage) => void;
-  onDelete: (messageId: string) => void;
+  onDeleteForMe: (messageId: string) => void;
+  onRecall: (messageId: string) => void;
   onForward: (messageId: string) => void;
+  /** Chỉ chat 1-1 có Sửa trong menu (mobile) */
+  allowEdit?: boolean;
   onReact: (messageId: string, type: ReactionType) => void;
   onRetry: (message: IMessage) => void;
   onUnpin?: (messageId: string) => void;
@@ -39,11 +43,14 @@ export function MessageList({
   hasMore,
   loading,
   searchQuery = "",
+  jumpToMessageId = null,
   onLoadOlder,
   onReply,
   onEdit,
-  onDelete,
+  onDeleteForMe,
+  onRecall,
   onForward,
+  allowEdit = true,
   onReact,
   onRetry,
   onUnpin,
@@ -51,9 +58,6 @@ export function MessageList({
 }: MessageListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const setUi = useChatStore((s) => s.setUi);
-  const selectionMode = useChatStore((s) => s.ui.selectionMode);
-  const selectedIds = useChatStore((s) => s.ui.selectedIds);
-  const toggleSelection = useChatStore((s) => s.toggleSelection);
   const isAtBottom = useChatStore((s) => s.ui.isAtBottom);
 
   const filtered = useMemo(
@@ -75,9 +79,19 @@ export function MessageList({
     return map;
   }, [participants]);
 
+  const pinnedIdSet = useMemo(
+    () => new Set((pinnedMessages ?? []).map((m) => m._id)),
+    [pinnedMessages]
+  );
+
   const groups = useMemo(
     () => groupMessagesForList(filtered, currentUserId, replyMap),
     [filtered, currentUserId, replyMap]
+  );
+
+  const allGroups = useMemo(
+    () => groupMessagesForList(messages, currentUserId, replyMap),
+    [messages, currentUserId, replyMap]
   );
 
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
@@ -94,18 +108,29 @@ export function MessageList({
     rowVirtualizer.scrollToIndex(groups.length - 1, { align: "end", behavior });
   }, [groups.length, rowVirtualizer]);
 
-  const handleJumpToMessage = useCallback((messageId: string) => {
-    const index = groups.findIndex(
-      (g) =>
-        (g.kind === "message" && g.message._id === messageId) ||
-        (g.kind === "mediaGroup" && g.messages.some((m) => m._id === messageId))
-    );
-    if (index !== -1) {
-      rowVirtualizer.scrollToIndex(index, { align: "center", behavior: "smooth" });
-      setHighlightedId(messageId);
-      setTimeout(() => setHighlightedId(null), 2000);
-    }
-  }, [groups, rowVirtualizer]);
+  const handleJumpToMessage = useCallback(
+    (messageId: string) => {
+      const index = allGroups.findIndex(
+        (g) =>
+          (g.kind === "message" && g.message._id === messageId) ||
+          (g.kind === "mediaGroup" && g.messages.some((m) => m._id === messageId))
+      );
+      if (index === -1) return;
+      if (searchQuery) {
+        setUi({ searchQuery: "" });
+      }
+      requestAnimationFrame(() => {
+        rowVirtualizer.scrollToIndex(index, { align: "center", behavior: "smooth" });
+        setHighlightedId(messageId);
+        setTimeout(() => setHighlightedId(null), 2000);
+      });
+    },
+    [allGroups, rowVirtualizer, searchQuery, setUi]
+  );
+
+  useEffect(() => {
+    if (jumpToMessageId) handleJumpToMessage(jumpToMessageId);
+  }, [jumpToMessageId, handleJumpToMessage]);
 
   useEffect(() => {
     if (isAtBottom) scrollToBottom("auto");
@@ -215,18 +240,20 @@ export function MessageList({
                             avatar={participantMap[m.senderId]?.avatar}
                             senderName={participantMap[m.senderId]?.name}
                             locale={locale}
-                            selectionMode={selectionMode}
-                            selected={selectedIds.has(m._id)}
                             isHighlighted={highlightedId === m._id}
                             onJumpToReply={m.replyTo ? () => handleJumpToMessage(m.replyTo!) : undefined}
                             onReply={() => onReply(m)}
-                            onEdit={item.isMine ? () => onEdit(m) : undefined}
-                            onDelete={() => onDelete(m._id)}
+                            onEdit={
+                              allowEdit && item.isMine ? () => onEdit(m) : undefined
+                            }
+                            onDeleteForMe={() => onDeleteForMe(m._id)}
+                            onRecall={() => onRecall(m._id)}
                             onForward={() => onForward(m._id)}
                             onReact={(type) => onReact(m._id, type)}
                             onRetry={() => onRetry(m)}
-                            onToggleSelect={() => toggleSelection(m._id)}
-                            onPin={onPin ? () => onPin(m._id) : undefined}
+                            isPinned={pinnedIdSet.has(m._id)}
+                            onPin={onPin && !pinnedIdSet.has(m._id) ? () => onPin(m._id) : undefined}
+                            onUnpin={onUnpin && pinnedIdSet.has(m._id) ? () => onUnpin(m._id) : undefined}
                           />
                         </div>
                       ))}
@@ -245,18 +272,28 @@ export function MessageList({
                         : undefined
                     }
                     locale={locale}
-                    selectionMode={selectionMode}
-                    selected={selectedIds.has(item.message._id)}
                     isHighlighted={highlightedId === item.message._id}
                     onJumpToReply={item.message.replyTo ? () => handleJumpToMessage(item.message.replyTo!) : undefined}
                     onReply={() => onReply(item.message)}
-                    onEdit={item.isMine ? () => onEdit(item.message) : undefined}
-                    onDelete={() => onDelete(item.message._id)}
+                    onEdit={
+                      allowEdit && item.isMine ? () => onEdit(item.message) : undefined
+                    }
+                    onDeleteForMe={() => onDeleteForMe(item.message._id)}
+                    onRecall={() => onRecall(item.message._id)}
                     onForward={() => onForward(item.message._id)}
                     onReact={(type) => onReact(item.message._id, type)}
                     onRetry={() => onRetry(item.message)}
-                    onToggleSelect={() => toggleSelection(item.message._id)}
-                    onPin={onPin ? () => onPin(item.message._id) : undefined}
+                    isPinned={pinnedIdSet.has(item.message._id)}
+                    onPin={
+                      onPin && !pinnedIdSet.has(item.message._id)
+                        ? () => onPin(item.message._id)
+                        : undefined
+                    }
+                    onUnpin={
+                      onUnpin && pinnedIdSet.has(item.message._id)
+                        ? () => onUnpin(item.message._id)
+                        : undefined
+                    }
                   />
                 )}
               </div>

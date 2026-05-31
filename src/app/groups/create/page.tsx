@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuthGuard } from "@/src/hooks/use-auth-guard";
 import { useFriends } from "@/src/hooks/use-contacts";
 import { contactsService } from "@/src/services/contacts/contacts.service";
@@ -9,14 +9,21 @@ import { useToast } from "@/src/components/providers/toast-provider";
 import { ArrowLeft, Check, Users } from "lucide-react";
 import Image from "next/image";
 
-export default function CreateGroupPage() {
+function CreateGroupContent() {
   const auth = useAuthGuard();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const prefillId = searchParams.get("prefill");
   const { showToast } = useToast();
   const friendsQuery = useFriends(auth.user?._id);
 
   const [groupName, setGroupName] = useState("");
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!prefillId || prefillId === auth.user?._id) return;
+    setSelectedIds((prev) => (prev.includes(prefillId) ? prev : [...prev, prefillId]));
+  }, [prefillId, auth.user?._id]);
   const [loading, setLoading] = useState(false);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
@@ -143,5 +150,13 @@ export default function CreateGroupPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function CreateGroupPage() {
+  return (
+    <Suspense fallback={null}>
+      <CreateGroupContent />
+    </Suspense>
   );
 }

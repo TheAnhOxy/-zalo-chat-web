@@ -16,6 +16,9 @@ const strings = {
     reply: "Trả lời",
     edit: "Chỉnh sửa",
     delete: "Xóa",
+    recall: "Thu hồi",
+    deleteForMe: "Xóa phía tôi",
+    copy: "Sao chép",
     forward: "Chuyển tiếp",
     react: "Cảm xúc",
     edited: "Đã chỉnh sửa",
@@ -35,6 +38,7 @@ const strings = {
     pinnedMessage: "Tin nhắn ghim",
     unpin: "Bỏ ghim",
     pin: "Ghim tin nhắn",
+    report: "Báo cáo",
   },
   en: {
     chatTitle: "Chat",
@@ -51,6 +55,9 @@ const strings = {
     reply: "Reply",
     edit: "Edit",
     delete: "Delete",
+    recall: "Recall",
+    deleteForMe: "Delete for me",
+    copy: "Copy",
     forward: "Forward",
     react: "React",
     edited: "Edited",
@@ -70,6 +77,7 @@ const strings = {
     pinnedMessage: "Pinned message",
     unpin: "Unpin",
     pin: "Pin message",
+    report: "Report",
   },
 } as const;
 
