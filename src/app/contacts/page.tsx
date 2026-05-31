@@ -38,7 +38,7 @@ export default function ContactsPage() {
   // Setup Socket.io for real-time group updates
   useEffect(() => {
     if (!auth.user?._id) return;
-    
+
     const socketURL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:3000";
     const socket = io(socketURL, {
       query: { userId: auth.user._id },
@@ -64,7 +64,7 @@ export default function ContactsPage() {
     const list = groupsQuery.data || [];
     const keyword = search.toLowerCase().trim();
     let result = list.filter((g) => g.name?.toLowerCase().includes(keyword));
-    
+
     if (groupSortMode === "ADMIN") {
       result = result.filter(g => g.members?.some(m => m.userId === auth.user?._id && m.role === "ADMIN"));
     }
@@ -88,11 +88,11 @@ export default function ContactsPage() {
   const userInitial = auth.user.fullName?.charAt(0).toUpperCase() || "U";
 
   const friendsList = friendsQuery.data || [];
-  
+
   const filteredFriends = friendsList.filter((f) => {
     const keyword = search.toLowerCase().trim();
     return (
-      f.fullName?.toLowerCase().includes(keyword) || 
+      f.fullName?.toLowerCase().includes(keyword) ||
       f.phone?.includes(keyword) ||
       f.email?.toLowerCase().includes(keyword)
     );
@@ -156,7 +156,7 @@ export default function ContactsPage() {
                   placeholder="Tìm kiếm danh bạ"
                 />
               </div>
-              <button 
+              <button
                 onClick={() => router.push("/contacts/add")}
                 className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700 transition hover:bg-emerald-200"
                 title="Thêm bạn"
@@ -170,17 +170,15 @@ export default function ContactsPage() {
           <div className="flex border-b border-slate-200">
             <button
               onClick={() => setActiveTab("FRIENDS")}
-              className={`flex-1 py-3 text-sm font-semibold transition ${
-                activeTab === "FRIENDS" ? "border-b-2 border-emerald-600 text-emerald-700" : "text-slate-500 hover:bg-slate-100"
-              }`}
+              className={`flex-1 py-3 text-sm font-semibold transition ${activeTab === "FRIENDS" ? "border-b-2 border-emerald-600 text-emerald-700" : "text-slate-500 hover:bg-slate-100"
+                }`}
             >
               Bạn bè
             </button>
             <button
               onClick={() => setActiveTab("GROUPS")}
-              className={`flex-1 py-3 text-sm font-semibold transition ${
-                activeTab === "GROUPS" ? "border-b-2 border-emerald-600 text-emerald-700" : "text-slate-500 hover:bg-slate-100"
-              }`}
+              className={`flex-1 py-3 text-sm font-semibold transition ${activeTab === "GROUPS" ? "border-b-2 border-emerald-600 text-emerald-700" : "text-slate-500 hover:bg-slate-100"
+                }`}
             >
               Nhóm
             </button>
@@ -206,7 +204,7 @@ export default function ContactsPage() {
                 <div className="mt-2 border-t border-slate-200 px-4 py-2">
                   <p className="text-xs font-semibold text-slate-500 uppercase">Bạn bè ({filteredFriends.length})</p>
                 </div>
-                
+
                 {/* Friend List */}
                 <div className="space-y-1 pb-4">
                   {friendsQuery.isLoading ? (
@@ -244,7 +242,7 @@ export default function ContactsPage() {
 
             {activeTab === "GROUPS" && (
               <div className="py-2">
-                 <Link href="/groups/create" className="flex items-center gap-3 px-4 py-3 hover:bg-slate-100 transition">
+                <Link href="/groups/create" className="flex items-center gap-3 px-4 py-3 hover:bg-slate-100 transition">
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
                     <Users size={20} />
                   </div>
@@ -253,8 +251,8 @@ export default function ContactsPage() {
 
                 <div className="mt-2 flex items-center justify-between border-t border-slate-200 px-4 py-2">
                   <p className="text-xs font-semibold text-slate-500 uppercase">Nhóm đang tham gia ({filteredGroups.length})</p>
-                  <select 
-                    value={groupSortMode} 
+                  <select
+                    value={groupSortMode}
                     onChange={(e) => setGroupSortMode(e.target.value as any)}
                     className="cursor-pointer bg-transparent text-xs font-medium text-slate-600 outline-none"
                   >
@@ -263,7 +261,7 @@ export default function ContactsPage() {
                     <option value="ADMIN">Nhóm quản lý</option>
                   </select>
                 </div>
-                
+
                 <div className="space-y-1 pb-4">
                   {groupsQuery.isLoading ? (
                     <div className="px-4 py-8 text-center text-sm text-slate-500">Đang tải danh sách nhóm...</div>
@@ -297,13 +295,13 @@ export default function ContactsPage() {
         {/* Main Content Area */}
         <section className="hidden flex-col bg-white md:flex">
           <div className="flex h-full flex-col items-center justify-center text-center">
-             <div className="mb-4 flex h-24 w-24 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-               <Users size={48} />
-             </div>
-             <h2 className="text-xl font-semibold text-slate-800">Danh bạ QuickChat</h2>
-             <p className="mt-2 max-w-md text-sm text-slate-500">
-               Chọn một liên hệ từ danh sách bên trái để xem thông tin chi tiết hoặc bắt đầu cuộc trò chuyện mới.
-             </p>
+            <div className="mb-4 flex h-24 w-24 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+              <Users size={48} />
+            </div>
+            <h2 className="text-xl font-semibold text-slate-800">Danh bạ QuickChat</h2>
+            <p className="mt-2 max-w-md text-sm text-slate-500">
+              Chọn một liên hệ từ danh sách bên trái để xem thông tin chi tiết hoặc bắt đầu cuộc trò chuyện mới.
+            </p>
           </div>
         </section>
 

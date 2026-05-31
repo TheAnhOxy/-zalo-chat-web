@@ -1,205 +1,161 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthGuard } from "@/src/hooks/use-auth-guard";
 import { useFriends } from "@/src/hooks/use-contacts";
 import { PageLoader } from "@/src/components/ui/page-state";
-import { ArrowLeft, Cake, Calendar as CalendarIcon, List, Settings } from "lucide-react";
+import { ArrowLeft, Cake, Calendar, MessageSquare, Settings } from "lucide-react";
 import Image from "next/image";
+import { contactsService } from "@/src/services/contacts/contacts.service";
+import { useToast } from "@/src/components/providers/toast-provider";
 
-type ViewMode = "LIST" | "CALENDAR";
+const WEEKDAYS = ["Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"];
 
 export default function BirthdaysPage() {
   const auth = useAuthGuard();
   const router = useRouter();
   const friendsQuery = useFriends(auth.user?._id);
+  const { showToast } = useToast();
 
-  const [viewMode, setViewMode] = useState<ViewMode>("LIST");
-  const today = new Date();
-
-  const birthdays = useMemo(() => {
+  const groups = useMemo(() => {
     const list = friendsQuery.data || [];
     const withDob = list.filter((f) => f.dob);
     
-    return withDob.sort((a, b) => {
-      const dateA = new Date(a.dob!);
-      const dateB = new Date(b.dob!);
-      
-      const nextBirthdayA = new Date(today.getFullYear(), dateA.getMonth(), dateA.getDate());
-      if (nextBirthdayA < today) nextBirthdayA.setFullYear(today.getFullYear() + 1);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-      const nextBirthdayB = new Date(today.getFullYear(), dateB.getMonth(), dateB.getDate());
-      if (nextBirthdayB < today) nextBirthdayB.setFullYear(today.getFullYear() + 1);
+    const past: typeof withDob = [];
+    const upcoming: typeof withDob = [];
 
-      return nextBirthdayA.getTime() - nextBirthdayB.getTime();
+    for (const u of withDob) {
+      const dobDate = new Date(u.dob!);
+      const thisYearBirthday = new Date(now.getFullYear(), dobDate.getMonth(), dobDate.getDate());
+
+      if (thisYearBirthday < today) {
+        past.push(u);
+      } else {
+        upcoming.push(u);
+      }
+    }
+
+    past.sort((a, b) => {
+      const da = new Date(now.getFullYear(), new Date(a.dob!).getMonth(), new Date(a.dob!).getDate());
+      const db = new Date(now.getFullYear(), new Date(b.dob!).getMonth(), new Date(b.dob!).getDate());
+      return db.getTime() - da.getTime(); // closest past first
     });
-  }, [friendsQuery.data, today]);
 
-  // Calendar logic for current month
-  const calendarDays = useMemo(() => {
-    const currentMonth = today.getMonth();
-    const currentYear = today.getFullYear();
-    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-    const firstDayIndex = new Date(currentYear, currentMonth, 1).getDay(); // 0 is Sunday
-    
-    // Adjust so Monday is 0, Sunday is 6
-    const adjustedFirstDayIndex = firstDayIndex === 0 ? 6 : firstDayIndex - 1;
-
-    return Array.from({ length: 42 }).map((_, i) => {
-      const dayNumber = i - adjustedFirstDayIndex + 1;
-      const isCurrentMonth = dayNumber > 0 && dayNumber <= daysInMonth;
-      
-      // Find friends having birthday this day
-      const bdays = isCurrentMonth ? birthdays.filter((f) => {
-        const d = new Date(f.dob!);
-        return d.getMonth() === currentMonth && d.getDate() === dayNumber;
-      }) : [];
-
-      return {
-        dayNumber: isCurrentMonth ? dayNumber : null,
-        isToday: isCurrentMonth && dayNumber === today.getDate(),
-        birthdays: bdays
-      };
+    upcoming.sort((a, b) => {
+      const da = new Date(now.getFullYear(), new Date(a.dob!).getMonth(), new Date(a.dob!).getDate());
+      const db = new Date(now.getFullYear(), new Date(b.dob!).getMonth(), new Date(b.dob!).getDate());
+      return da.getTime() - db.getTime(); // closest upcoming first
     });
-  }, [today, birthdays]);
+
+    return { past, upcoming };
+  }, [friendsQuery.data]);
+
+  const handleOpenChat = async (friendId: string) => {
+    if (!auth.user) return;
+    try {
+      const conv = await contactsService.findOrCreateDirectConversation(auth.user._id, friendId);
+      if (conv && (conv._id || conv.id)) {
+        router.push(`/?conversationId=${conv._id || conv.id}`);
+      } else {
+        router.push(`/?conversationId=${friendId}`);
+      }
+    } catch (e) {
+      router.push(`/?conversationId=${friendId}`);
+    }
+  };
 
   if (!auth.isInitialized || !auth.user) return <PageLoader />;
 
+  const renderTile = (friend: any) => {
+    const dob = new Date(friend.dob!);
+    const now = new Date();
+    const birthdayThisYear = new Date(now.getFullYear(), dob.getMonth(), dob.getDate());
+    const weekday = WEEKDAYS[birthdayThisYear.getDay()];
+    const dateStr = `${weekday}, ${dob.getDate()} tháng ${dob.getMonth() + 1}`;
+
+    return (
+      <div key={friend._id} className="flex items-center gap-3.5 bg-white px-4 py-3 border-b border-slate-100 last:border-b-0">
+        <div className="relative">
+          <div className="relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-50 text-emerald-600 font-bold">
+            {friend.avatar ? (
+              <Image src={friend.avatar} alt={friend.fullName} fill className="object-cover" unoptimized />
+            ) : (
+              (friend.fullName || "U").charAt(0).toUpperCase()
+            )}
+          </div>
+          <div className="absolute -bottom-0.5 -right-0.5 flex h-[20px] w-[20px] items-center justify-center rounded-full border-[1.5px] border-white bg-[#FF4D6D]">
+            <Cake size={11} className="text-white" />
+          </div>
+        </div>
+        
+        <div className="flex-1">
+          <p className="text-[14px] font-semibold text-slate-800">{friend.fullName}</p>
+          <p className="mt-0.5 text-[12px] text-slate-500">{dateStr}</p>
+        </div>
+
+        <button 
+          onClick={() => handleOpenChat(friend._id)}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 transition hover:bg-emerald-100"
+        >
+          <MessageSquare size={18} />
+        </button>
+      </div>
+    );
+  };
+
   return (
     <main className="h-screen overflow-hidden bg-slate-50 text-slate-800">
-      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-4">
+      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
         <div className="flex items-center gap-4">
           <button onClick={() => router.back()} className="rounded-full p-2 text-slate-600 transition hover:bg-slate-100">
             <ArrowLeft size={24} />
           </button>
-          <h1 className="text-xl font-bold">Sinh nhật</h1>
+          <h1 className="text-[17px] font-semibold">Sinh nhật</h1>
         </div>
-        <button onClick={() => router.push("/contacts/birthdays/settings")} className="rounded-full p-2 text-slate-600 transition hover:bg-slate-100">
-          <Settings size={22} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => router.push("/contacts/birthdays/calendar")} className="rounded-full p-2 text-slate-600 transition hover:bg-slate-100">
+            <Calendar size={22} />
+          </button>
+          <button onClick={() => router.push("/contacts/birthdays/settings")} className="rounded-full p-2 text-slate-600 transition hover:bg-slate-100">
+            <Settings size={22} />
+          </button>
+        </div>
       </header>
 
-      <div className="mx-auto h-[calc(100vh-73px)] w-full max-w-3xl overflow-y-auto p-4 md:p-6">
+      <div className="h-[calc(100vh-65px)] overflow-y-auto pb-8">
+        {friendsQuery.isLoading && <div className="py-10 text-center text-sm text-slate-500">Đang tải dữ liệu...</div>}
         
-        {/* Toggle View */}
-        <div className="mb-6 flex overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-          <button
-            onClick={() => setViewMode("LIST")}
-            className={`flex flex-1 items-center justify-center gap-2 py-3 text-sm font-semibold transition ${
-              viewMode === "LIST" ? "bg-rose-50 text-rose-600" : "text-slate-500 hover:bg-slate-50"
-            }`}
-          >
-            <List size={18} /> Danh sách
-          </button>
-          <div className="w-px bg-slate-200" />
-          <button
-            onClick={() => setViewMode("CALENDAR")}
-            className={`flex flex-1 items-center justify-center gap-2 py-3 text-sm font-semibold transition ${
-              viewMode === "CALENDAR" ? "bg-rose-50 text-rose-600" : "text-slate-500 hover:bg-slate-50"
-            }`}
-          >
-            <CalendarIcon size={18} /> Lịch
-          </button>
-        </div>
-
-        {viewMode === "LIST" && (
-          <>
-            <div className="mb-6 rounded-2xl bg-gradient-to-r from-rose-400 to-pink-500 p-6 text-white shadow-md">
-              <div className="flex items-center gap-3">
-                <Cake size={32} />
-                <h2 className="text-2xl font-bold">Sinh nhật sắp tới</h2>
-              </div>
-              <p className="mt-2 text-rose-50 opacity-90">Đừng quên gửi những lời chúc tốt đẹp nhất đến bạn bè của bạn!</p>
+        {!friendsQuery.isLoading && groups.past.length === 0 && groups.upcoming.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-20">
+            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-emerald-50">
+              <Cake size={40} className="text-emerald-600" />
             </div>
-
-            {friendsQuery.isLoading && <div className="py-10 text-center text-slate-500">Đang tải...</div>}
-            
-            {!friendsQuery.isLoading && birthdays.length === 0 && (
-              <div className="py-20 text-center text-slate-500">
-                Không có sinh nhật nào của bạn bè.
-              </div>
-            )}
-
-            <div className="space-y-3 pb-8">
-              {birthdays.map((friend) => {
-                 const dobDate = new Date(friend.dob!);
-                 const isToday = dobDate.getDate() === today.getDate() && dobDate.getMonth() === today.getMonth();
-
-                 return (
-                  <div key={friend._id} className="flex items-center gap-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <div className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-pink-300 to-rose-400 text-white font-bold">
-                      {friend.avatar ? (
-                        <Image src={friend.avatar} alt={friend.fullName} fill className="object-cover" unoptimized />
-                      ) : (
-                        friend.fullName.charAt(0).toUpperCase()
-                      )}
-                    </div>
-                    <div className="flex-1">
-                      <p className="font-bold text-slate-800">{friend.fullName}</p>
-                      <p className={`text-sm ${isToday ? "font-semibold text-rose-500" : "text-slate-500"}`}>
-                        {isToday ? "Hôm nay!" : `${dobDate.getDate()} tháng ${dobDate.getMonth() + 1}`}
-                      </p>
-                    </div>
-                    <button className="rounded-lg bg-rose-100 px-4 py-2 text-sm font-semibold text-rose-600 transition hover:bg-rose-200">
-                      Chúc mừng
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </>
+            <p className="mt-4 text-[14px] text-slate-500">Không có thông tin sinh nhật nào</p>
+          </div>
         )}
 
-        {viewMode === "CALENDAR" && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="mb-6 text-center text-xl font-bold text-slate-800">
-              Tháng {today.getMonth() + 1} Năm {today.getFullYear()}
-            </h2>
-            
-            <div className="grid grid-cols-7 gap-2">
-              {["T2", "T3", "T4", "T5", "T6", "T7", "CN"].map((day) => (
-                <div key={day} className="py-2 text-center text-xs font-bold text-slate-400">
-                  {day}
-                </div>
-              ))}
-              
-              {calendarDays.map((day, idx) => (
-                <div 
-                  key={idx} 
-                  className={`relative flex h-16 flex-col items-center justify-start rounded-lg border p-1 transition ${
-                    day.isToday ? "border-rose-300 bg-rose-50" : "border-transparent bg-slate-50"
-                  } ${!day.dayNumber ? "opacity-0" : ""}`}
-                >
-                  {day.dayNumber && (
-                    <>
-                      <span className={`text-xs font-semibold ${day.isToday ? "text-rose-600" : "text-slate-600"}`}>
-                        {day.dayNumber}
-                      </span>
-                      
-                      {/* Avatars */}
-                      <div className="mt-1 flex flex-wrap justify-center gap-1">
-                        {day.birthdays.slice(0, 3).map((f) => (
-                           <div key={f._id} className="relative h-5 w-5 overflow-hidden rounded-full border border-white">
-                             {f.avatar ? (
-                               <Image src={f.avatar} alt={f.fullName} fill className="object-cover" unoptimized />
-                             ) : (
-                               <div className="flex h-full w-full items-center justify-center bg-rose-200 text-[10px] font-bold text-rose-700">
-                                 {f.fullName.charAt(0).toUpperCase()}
-                               </div>
-                             )}
-                           </div>
-                        ))}
-                        {day.birthdays.length > 3 && (
-                          <div className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-200 text-[9px] font-bold text-slate-600">
-                            +{day.birthdays.length - 3}
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              ))}
+        {groups.past.length > 0 && (
+          <div>
+            <div className="px-4 py-3 pt-4">
+              <p className="text-[13px] font-bold text-slate-500">Sinh nhật đã qua</p>
+            </div>
+            <div className="bg-white">
+              {groups.past.map(renderTile)}
+            </div>
+          </div>
+        )}
+
+        {groups.upcoming.length > 0 && (
+          <div>
+            <div className="px-4 py-3 pt-4">
+              <p className="text-[13px] font-bold text-slate-500">Sinh nhật sắp tới</p>
+            </div>
+            <div className="bg-white">
+              {groups.upcoming.map(renderTile)}
             </div>
           </div>
         )}

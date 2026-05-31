@@ -14,8 +14,28 @@ export interface GroupItem {
 // NOTE: Backend endpoints for contacts/groups are not specified in the request.
 // Using conventional endpoints so frontend is ready; adjust path if your backend differs.
 export const contactsService = {
-  getFriends(userId: string) {
-    return apiClient.get<IUser[]>(`/contacts/${userId}/friends`).then((res) => res.data);
+  async getFriends(userId: string) {
+    try {
+      const res = await apiClient.get<any[]>(`/friendships/user/${userId}`);
+      const accepted = res.data.filter((f) => f.status === "ACCEPTED");
+      
+      const friends = await Promise.all(
+        accepted.map(async (f) => {
+          try {
+            const friendId = f.requesterId === userId ? f.addresseeId : f.requesterId;
+            const userRes = await apiClient.get<IUser>(`/users/${friendId}`);
+            return userRes.data;
+          } catch (e) {
+            return null;
+          }
+        })
+      );
+      
+      return friends.filter(Boolean) as IUser[];
+    } catch (error) {
+      console.error("Failed to fetch friends", error);
+      return [];
+    }
   },
 
   getGroups(userId: string) {
@@ -99,6 +119,17 @@ export const contactsService = {
     };
     if (avatar) payload.avatar = avatar;
 
+    return apiClient.post(`/conversations`, payload).then(res => res.data);
+  },
+
+  async findOrCreateDirectConversation(currentUserId: string, targetUserId: string) {
+    const payload = {
+      type: "PRIVATE",
+      members: [
+        { userId: currentUserId, role: "MEMBER" },
+        { userId: targetUserId, role: "MEMBER" }
+      ]
+    };
     return apiClient.post(`/conversations`, payload).then(res => res.data);
   },
 

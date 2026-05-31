@@ -79,7 +79,7 @@ export default function CreateGroupPage() {
         {/* Left Side: Info */}
         <div className="border-b border-slate-200 bg-white p-6 md:w-1/3 md:border-b-0 md:border-r">
           <div className="flex flex-col items-center">
-            <label className="mb-4 flex h-24 w-24 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-slate-100 text-slate-400 transition hover:bg-slate-200">
+            <label className="relative mb-4 flex h-24 w-24 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-slate-100 text-slate-400 transition hover:bg-slate-200">
               <input type="file" accept="image/*" className="hidden" onChange={(e) => {
                 const file = e.target.files?.[0];
                 if (file) {

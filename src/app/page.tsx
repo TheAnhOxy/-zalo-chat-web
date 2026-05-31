@@ -482,9 +482,8 @@ export default function HomePage() {
                 <button
                   key={item.key}
                   onClick={() => setReadFilter(item.key as ReadFilter)}
-                  className={`rounded-full px-3 py-1 text-xs font-medium transition ${
-                    readFilter === item.key ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-600 hover:bg-slate-300"
-                  }`}
+                  className={`rounded-full px-3 py-1 text-xs font-medium transition ${readFilter === item.key ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-600 hover:bg-slate-300"
+                    }`}
                 >
                   {item.label}
                 </button>
@@ -497,9 +496,8 @@ export default function HomePage() {
               <button
                 key={item.id}
                 onClick={() => setActiveConversationId(item.id)}
-                className={`grid w-full grid-cols-[52px_1fr_auto] gap-3 border-b border-slate-100 px-3 py-3 text-left transition hover:bg-white ${
-                  activeConversationId === item.id ? "bg-white" : "bg-transparent"
-                }`}
+                className={`grid w-full grid-cols-[52px_1fr_auto] gap-3 border-b border-slate-100 px-3 py-3 text-left transition hover:bg-white ${activeConversationId === item.id ? "bg-white" : "bg-transparent"
+                  }`}
               >
                 <div className={`relative mt-0.5 h-12 w-12 rounded-full bg-gradient-to-br ${item.avatarColor}`}>
                   {item.online ? <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-emerald-500" /> : null}
@@ -561,9 +559,8 @@ export default function HomePage() {
                   return (
                     <div key={message.id} className={`flex ${message.sender === "me" ? "justify-end" : "justify-start"}`}>
                       <div
-                        className={`max-w-[70%] rounded-2xl px-4 py-2 text-sm ${
-                          message.sender === "me" ? "bg-emerald-600 text-white" : "border border-slate-200 bg-white text-slate-700"
-                        }`}
+                        className={`max-w-[70%] rounded-2xl px-4 py-2 text-sm ${message.sender === "me" ? "bg-emerald-600 text-white" : "border border-slate-200 bg-white text-slate-700"
+                          }`}
                       >
                         <p>{message.text}</p>
                         <p className={`mt-1 text-[11px] ${message.sender === "me" ? "text-emerald-100" : "text-slate-400"}`}>{message.time}</p>
@@ -724,11 +721,10 @@ export default function HomePage() {
                 <div className="flex gap-2">
                   <button
                     onClick={() => setProfileEditMode((prev) => !prev)}
-                    className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${
-                      profileEditMode
+                    className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${profileEditMode
                         ? "bg-slate-100 text-slate-700 hover:bg-slate-200"
                         : "bg-gradient-to-r from-emerald-500 to-cyan-500 text-white shadow-lg hover:-translate-y-0.5"
-                    }`}
+                      }`}
                   >
                     {profileEditMode ? "Xem hồ sơ" : "Cập nhật"}
                   </button>
@@ -829,9 +825,8 @@ export default function HomePage() {
                     <button
                       key={item.key}
                       onClick={() => setSettingsTab(item.key as SettingsTab)}
-                      className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition ${
-                        settingsTab === item.key ? "bg-emerald-100 font-semibold text-emerald-900" : "text-slate-600 hover:bg-slate-200"
-                      }`}
+                      className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition ${settingsTab === item.key ? "bg-emerald-100 font-semibold text-emerald-900" : "text-slate-600 hover:bg-slate-200"
+                        }`}
                     >
                       <Icon size={16} />
                       {item.label}

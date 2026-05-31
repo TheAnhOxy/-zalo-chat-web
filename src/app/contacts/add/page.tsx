@@ -16,6 +16,7 @@ export default function AddFriendPage() {
   const { showToast } = useToast();
 
   const [phone, setPhone] = useState("");
+  const [countryCode, setCountryCode] = useState("+84");
   const [message, setMessage] = useState("Xin chào, tôi muốn kết bạn với bạn!");
   const [loading, setLoading] = useState(false);
   const [foundUser, setFoundUser] = useState<IUser | null>(null);
@@ -23,13 +24,25 @@ export default function AddFriendPage() {
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!phone.trim()) return;
+    const raw = phone.trim();
+    if (!raw) return;
+
+    let searchPhone = raw;
+    if (searchPhone.startsWith('+')) {
+      // Người dùng tự nhập mã quốc gia
+    } else if (searchPhone.startsWith('0')) {
+      // Đổi số 0 ở đầu thành mã quốc gia
+      searchPhone = `${countryCode}${searchPhone.substring(1)}`;
+    } else {
+      // Thêm mã quốc gia vào đầu
+      searchPhone = `${countryCode}${searchPhone}`;
+    }
 
     setLoading(true);
     setSearched(true);
     setFoundUser(null);
     try {
-      const user = await contactsService.searchByPhone(phone);
+      const user = await contactsService.searchByPhone(searchPhone);
       if (user && user._id !== auth.user?._id) {
         setFoundUser(user);
       } else if (user && user._id === auth.user?._id) {
@@ -109,6 +122,9 @@ export default function AddFriendPage() {
 
         <form onSubmit={handleSearch} className="mb-6">
           <div className="flex overflow-hidden rounded-xl border border-slate-300 bg-white shadow-sm focus-within:border-emerald-500 focus-within:ring-1 focus-within:ring-emerald-500">
+            <div className="flex items-center border-r border-slate-200 bg-slate-50 px-4 text-sm font-semibold text-slate-600">
+              {countryCode}
+            </div>
             <input
               type="text"
               placeholder="Nhập số điện thoại cần tìm..."
