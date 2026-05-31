@@ -1,14 +1,16 @@
 export type MessageType = 'TEXT' | 'IMAGE' | 'VIDEO' | 'FILE' | 'VOICE' | 'LOCATION' | 'CONTACT';
-export type MessageStatus = 'SENDING' | 'SENT' | 'DELIVERED' | 'SEEN';
+export type MessageStatus = 'SENDING' | 'SENT' | 'DELIVERED' | 'SEEN' | 'FAILED';
 export type ReactionType = 'LIKE' | 'LOVE' | 'HAHA' | 'WOW' | 'SAD' | 'ANGRY';
 
 export interface IMessageMetadata {
   fileName?: string;
   fileSize?: number;
   thumbnail?: string;
+  thumbnailUrl?: string;
   lat?: number;
   lng?: number;
-  duration?: number; // Cho Voice/Video
+  duration?: number;
+  groupId?: string;
 }
 
 export interface IReaction {
@@ -28,12 +30,18 @@ export interface IMessage {
   type: MessageType;
   content: string;
   metadata?: IMessageMetadata;
-  replyTo?: string; // ID của message được reply
+  replyTo?: string;
   status: MessageStatus;
   isRecalled: boolean;
-  deletedBy: string[]; // Chứa UserID của những người đã xóa tin nhắn ở phía họ
+  deletedBy: string[];
   reactions: IReaction[];
   seenBy: ISeenBy[];
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: Date | string;
+  updatedAt: Date | string;
+  /** Optimistic UI temp id from client */
+  clientTempId?: string;
+  editedAt?: Date | string;
+  forwardFrom?: string;
+  /** Call metadata when type references a call event */
+  callId?: string;
 }
