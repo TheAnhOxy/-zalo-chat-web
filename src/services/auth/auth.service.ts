@@ -5,6 +5,8 @@ import {
   ChangePasswordRequest,
   ForgotPasswordRequestOtpRequest,
   LoginRequest,
+  LoginResponse,
+  LoginChallengeStatusResponse,
   LogoutAllDevicesRequest,
   LogoutRequest,
   OtpSessionResponse,
@@ -71,13 +73,20 @@ function normalizeAuthResponse(payload: unknown): AuthResponse {
 }
 
 export const authService = {
-  login(payload: LoginRequest) {
-    if (process.env.NODE_ENV === "development") {
-      // Helps verify the browser payload matches Postman when backend returns 401.
-      console.log("[login payload]", payload);
-    }
-
-    return apiClient.post<unknown>("/auth/login", payload).then((res) => normalizeAuthResponse(res.data));
+  login(payload: LoginRequest): Promise<LoginResponse> {
+    return apiClient.post<unknown>("/auth/login", payload).then((res) => {
+      const raw = unwrapEnvelope<any>(res.data);
+      if (raw?.requiresEmailConfirmation) {
+        return {
+          requiresEmailConfirmation: true,
+          challengeId: raw.challengeId,
+          email: raw.email,
+          challengeExpiredAt: raw.challengeExpiredAt,
+          reason: raw.reason,
+        };
+      }
+      return normalizeAuthResponse(res.data);
+    });
   },
 
   register(payload: RegisterRequest) {
@@ -132,5 +141,34 @@ export const authService = {
 
   verifyPhoneLoginOtp(payload: VerifyOtpRequest) {
     return apiClient.post<unknown>("/auth/phone-login/verify-otp", payload).then((res) => normalizeAuthResponse(res.data));
+  },
+
+  checkLoginChallengeStatus(payload: { challengeId: string }): Promise<LoginChallengeStatusResponse> {
+    return apiClient
+      .post<unknown>("/auth/login-challenge/status", payload)
+      .then((res) => {
+        const raw = unwrapEnvelope<any>(res.data);
+        const status = (raw?.status || "pending").toLowerCase();
+
+        if (status === "consumed" || status === "approved") {
+          const norm = normalizeAuthResponse(res.data);
+          return {
+            challengeId: raw.challengeId,
+            status,
+            user: norm.user,
+            tokens: {
+              accessToken: norm.accessToken,
+              refreshToken: norm.refreshToken,
+              accessExpiredAt: raw.tokens?.accessExpiredAt || "",
+            },
+            revokedOldSessions: raw.revokedOldSessions,
+          };
+        }
+
+        return {
+          challengeId: raw?.challengeId || payload.challengeId,
+          status: raw?.status || status,
+        };
+      });
   },
 };

@@ -1,6 +1,7 @@
 export interface DeviceInfo {
   device: string;
   deviceName: string;
+  deviceFingerprint?: string;
 }
 
 export interface AuthTokens {
@@ -21,6 +22,28 @@ export interface AuthResponse {
   user: AuthUser;
   accessToken: string;
   refreshToken: string;
+}
+
+export interface LoginChallenge {
+  requiresEmailConfirmation: boolean;
+  challengeId: string;
+  email: string;
+  challengeExpiredAt: string;
+  reason?: string;
+}
+
+export type LoginResponse = AuthResponse | LoginChallenge;
+
+export interface LoginChallengeStatusResponse {
+  challengeId: string;
+  status: string;
+  user?: AuthUser;
+  tokens?: {
+    accessToken: string;
+    refreshToken: string;
+    accessExpiredAt: string;
+  };
+  revokedOldSessions?: boolean;
 }
 
 export type LoginOption = "quick" | "otp" | "2fa";

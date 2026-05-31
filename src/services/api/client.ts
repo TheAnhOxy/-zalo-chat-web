@@ -103,6 +103,15 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+function handleUnauthorizedRedirect() {
+  if (typeof window === "undefined") return;
+  clearStoredTokens();
+  clearStoredUser();
+  window.sessionStorage.removeItem("quickchat_pending_login");
+
+  window.location.href = "/login?reason=session_expired";
+}
+
 apiClient.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
@@ -138,8 +147,7 @@ apiClient.interceptors.response.use(
       const token = await refreshAccessToken();
 
       if (!token) {
-        clearStoredTokens();
-        clearStoredUser();
+        handleUnauthorizedRedirect();
         flushQueue(null);
         return Promise.reject(error);
       }
@@ -154,8 +162,7 @@ apiClient.interceptors.response.use(
 
       return apiClient(originalRequest);
     } catch (refreshError) {
-      clearStoredTokens();
-      clearStoredUser();
+      handleUnauthorizedRedirect();
       flushQueue(null);
       return Promise.reject(refreshError);
     } finally {

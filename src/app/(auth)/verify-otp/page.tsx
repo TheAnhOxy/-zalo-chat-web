@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -28,7 +28,7 @@ function formatCountdown(seconds: number) {
   return `${minutes}:${remaining}`;
 }
 
-export default function VerifyOtpPage() {
+function VerifyOtpInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { showToast } = useToast();
@@ -160,5 +160,22 @@ export default function VerifyOtpPage() {
         </button>
       </form>
     </AuthShell>
+  );
+}
+
+export default function VerifyOtpPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
+          <div className="text-center space-y-4">
+            <div className="h-10 w-10 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto" />
+            <p className="text-sm text-white/60">Đang tải...</p>
+          </div>
+        </div>
+      }
+    >
+      <VerifyOtpInner />
+    </Suspense>
   );
 }
