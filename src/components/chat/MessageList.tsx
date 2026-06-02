@@ -3,15 +3,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { IMessage, ReactionType } from "@/src/types/message";
-import { groupMessagesForList, messageMatchesSearch } from "@/src/lib/messages";
+import { ICall } from "@/src/types/call";
+import { groupMessagesForList, messageMatchesSearch, MessageGroupItem } from "@/src/lib/messages";
 import { MessageItem } from "@/src/components/chat/MessageItem";
 import { t, ChatLocale } from "@/src/lib/i18n/chat";
 import { useChatStore } from "@/src/store/chat-store";
 import { IConversationParticipant } from "@/src/types/conversation";
 import { PinnedMessagesHeader } from "@/src/components/chat/PinnedMessagesHeader";
+import { formatChatTime } from "@/src/lib/date-utils";
+import { Phone, PhoneMissed, Video, VideoOff } from "lucide-react";
 
 interface MessageListProps {
   messages: IMessage[];
+  calls?: ICall[];
   currentUserId: string;
   participants?: IConversationParticipant[];
   pinnedMessages?: IMessage[];
@@ -34,8 +38,13 @@ interface MessageListProps {
   onPin?: (messageId: string) => void;
 }
 
+type ChatItem = 
+  | MessageGroupItem
+  | ({ kind: "call" } & { call: ICall; key: string; createdAt: Date });
+
 export function MessageList({
   messages,
+  calls = [],
   currentUserId,
   participants,
   pinnedMessages,
@@ -60,11 +69,6 @@ export function MessageList({
   const setUi = useChatStore((s) => s.setUi);
   const isAtBottom = useChatStore((s) => s.ui.isAtBottom);
 
-  const filtered = useMemo(
-    () => (searchQuery ? messages.filter((m) => messageMatchesSearch(m, searchQuery)) : messages),
-    [messages, searchQuery]
-  );
-
   const replyMap = useMemo(() => {
     const map: Record<string, IMessage> = {};
     for (const m of messages) map[m._id] = m;
@@ -73,26 +77,81 @@ export function MessageList({
 
   const participantMap = useMemo(() => {
     const map: Record<string, { avatar?: string; name: string }> = {};
+    
+    // Build from participants prop
     if (participants) {
-      for (const p of participants) map[p.userId] = { avatar: p.avatar, name: p.fullName };
+      for (const p of participants) {
+        map[p.userId] = { 
+          avatar: p.avatar, 
+          name: p.fullName?.trim() || `User ${p.userId.slice(-4).toUpperCase()}` 
+        };
+      }
     }
+    
+    // Ensure all message senders are in map with fallback names
+    for (const msg of messages) {
+      const senderId = msg.senderId;
+      if (!map[senderId]) {
+        map[senderId] = {
+          avatar: undefined,
+          name: `User ${senderId.slice(-4).toUpperCase()}`,
+        };
+      }
+    }
+    
     return map;
-  }, [participants]);
+  }, [participants, messages]);
 
   const pinnedIdSet = useMemo(
     () => new Set((pinnedMessages ?? []).map((m) => m._id)),
     [pinnedMessages]
   );
 
-  const groups = useMemo(
-    () => groupMessagesForList(filtered, currentUserId, replyMap),
-    [filtered, currentUserId, replyMap]
-  );
+  // Group messages using existing function
+  const messageGroups = useMemo(() => {
+    return groupMessagesForList(messages, currentUserId, replyMap);
+  }, [messages, currentUserId, replyMap]);
 
-  const allGroups = useMemo(
-    () => groupMessagesForList(messages, currentUserId, replyMap),
-    [messages, currentUserId, replyMap]
-  );
+  // Filter based on search
+  const filteredGroups = useMemo(() => {
+    if (!searchQuery) return messageGroups;
+    return messageGroups.filter((item) => {
+      if (item.kind === "message") {
+        return messageMatchesSearch(item.message, searchQuery);
+      }
+      if (item.kind === "mediaGroup") {
+        return item.messages.some((m) => messageMatchesSearch(m, searchQuery));
+      }
+      return true; // Keep date separators
+    });
+  }, [messageGroups, searchQuery]);
+
+  // Combine filtered groups with calls in chronological order
+  const groups = useMemo(() => {
+    const result: ChatItem[] = [...filteredGroups];
+    
+    // Add calls to the list
+    for (const call of calls) {
+      result.push({
+        kind: "call",
+        call,
+        key: `call-${call._id}`,
+        createdAt: new Date(call.createdAt),
+      });
+    }
+
+    // Sort by createdAt
+    return result.sort((a, b) => {
+      const timeA = "createdAt" in a ? a.createdAt.getTime() : 0;
+      const timeB = "createdAt" in b ? b.createdAt.getTime() : 0;
+      return timeA - timeB;
+    });
+  }, [filteredGroups, calls]);
+
+  // For jumpToMessage - use unfiltered groups
+  const allGroups = useMemo(() => {
+    return groupMessagesForList(messages, currentUserId, replyMap);
+  }, [messages, currentUserId, replyMap]);
 
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
@@ -111,9 +170,9 @@ export function MessageList({
   const handleJumpToMessage = useCallback(
     (messageId: string) => {
       const index = allGroups.findIndex(
-        (g) =>
-          (g.kind === "message" && g.message._id === messageId) ||
-          (g.kind === "mediaGroup" && g.messages.some((m) => m._id === messageId))
+        (item) =>
+          (item.kind === "message" && item.message._id === messageId) ||
+          (item.kind === "mediaGroup" && item.messages.some((m) => m._id === messageId))
       );
       if (index === -1) return;
       if (searchQuery) {
@@ -259,7 +318,7 @@ export function MessageList({
                       ))}
                     </div>
                   </div>
-                ) : (
+                ) : item.kind === "message" ? (
                   <MessageItem
                     message={item.message}
                     isMine={item.isMine}
@@ -295,6 +354,83 @@ export function MessageList({
                         : undefined
                     }
                   />
+                ) : (
+                  (() => {
+                    const call = item.call;
+                    const isMine = call.callerId === currentUserId;
+                    const isMissed = call.status === "MISSED" || call.status === "REJECTED";
+                    const isVideo = call.type === "VIDEO";
+                    
+                    // Format duration
+                    const durationLabel =
+                      call.duration > 0
+                        ? (() => {
+                            const minutes = Math.floor(call.duration / 60);
+                            const seconds = call.duration % 60;
+                            if (minutes > 0) {
+                              return `${minutes} phút ${seconds} giây`;
+                            }
+                            return `${seconds} giây`;
+                          })()
+                        : "";
+
+                    const statusLabel = (() => {
+                      if (isMine) {
+                        return call.status === "MISSED" ? "Cuộc gọi không được trả lời" : `Cuộc gọi ${isVideo ? "video" : "thoại"}`;
+                      }
+                      if (isMissed) {
+                        return "Cuộc gọi nhỡ";
+                      }
+                      return `Cuộc gọi ${isVideo ? "video" : "thoại"}`;
+                    })();
+
+                    return (
+                      <div className={`flex gap-2 px-3 py-0.5 ${isMine ? "flex-row-reverse" : "flex-row"}`}>
+                        {!isMine && (
+                          <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gray-300">
+                            {participantMap[call.callerId]?.avatar ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={participantMap[call.callerId]?.avatar} alt="" className="h-full w-full object-cover" />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-white">
+                                {participantMap[call.callerId]?.name?.charAt(0).toUpperCase() || "?"}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {isMine && <div className="w-8 shrink-0" aria-hidden />}
+                        
+                        <div
+                          className={`flex items-center gap-2 rounded-lg px-3 py-2 max-w-xs ${
+                            isMissed
+                              ? "bg-red-100 text-red-700"
+                              : isMine
+                                ? "bg-green-100 text-green-700"
+                                : "bg-blue-100 text-blue-700"
+                          }`}
+                        >
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-1.5">
+                              {isVideo ? (
+                                isMissed ? <VideoOff className="h-4 w-4" /> : <Video className="h-4 w-4" />
+                              ) : isMissed ? (
+                                <PhoneMissed className="h-4 w-4" />
+                              ) : (
+                                <Phone className="h-4 w-4" />
+                              )}
+                              <span className="text-sm font-medium">{statusLabel}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs">
+                              <span>{durationLabel || "Không có nội dung"}</span>
+                              <span className="shrink-0 opacity-70">
+                                {formatChatTime(call.createdAt)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()
                 )}
               </div>
             );

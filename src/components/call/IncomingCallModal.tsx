@@ -22,9 +22,9 @@ export function IncomingCallModal({ call, onAccept, onReject }: IncomingCallModa
       : "Cuộc gọi thoại đến";
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-end justify-center bg-black/50 p-4 sm:items-center">
+    <div className="fixed inset-0 z-200 flex items-end justify-center bg-black/50 p-4 sm:items-center">
       <div
-        className="w-full max-w-sm rounded-2xl bg-[var(--qc-card)] p-6 shadow-2xl"
+        className="w-full max-w-sm rounded-2xl bg-(--qc-card) p-6 shadow-2xl"
         role="dialog"
         aria-labelledby="incoming-call-title"
       >
@@ -35,24 +35,18 @@ export function IncomingCallModal({ call, onAccept, onReject }: IncomingCallModa
               name={title}
               size={80}
             />
-            <span className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full bg-[var(--qc-primary)] text-white">
+            <span className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full bg-(--qc-primary) text-white">
               {isVideo ? <Video className="h-4 w-4" /> : <Phone className="h-4 w-4" />}
             </span>
           </div>
 
           <h2
             id="incoming-call-title"
-            className="mt-4 text-lg font-bold text-[var(--qc-text-primary)]"
+            className="mt-4 text-lg font-bold text-(--qc-text-primary)"
           >
             {title}
           </h2>
-          <p className="mt-1 text-sm text-[var(--qc-text-secondary)]">{subtitle}</p>
-
-          {call.isGroup ? (
-            <p className="mt-3 text-xs text-amber-600">
-              Cuộc gọi nhóm trên web chưa hỗ trợ đầy đủ — vui lòng dùng app mobile.
-            </p>
-          ) : null}
+          <p className="mt-1 text-sm text-(--qc-text-secondary)">{subtitle}</p>
 
           <div className="mt-6 flex w-full items-center justify-center gap-8">
             <button
@@ -66,8 +60,7 @@ export function IncomingCallModal({ call, onAccept, onReject }: IncomingCallModa
             <button
               type="button"
               onClick={onAccept}
-              disabled={call.isGroup}
-              className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--qc-primary)] text-white shadow-md hover:brightness-95 disabled:opacity-40"
+              className="flex h-14 w-14 items-center justify-center rounded-full bg-(--qc-primary) text-white shadow-md hover:brightness-95"
               aria-label="Trả lời"
             >
               <Phone className="h-6 w-6" />

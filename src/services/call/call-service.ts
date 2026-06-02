@@ -7,10 +7,11 @@ import {
 import { AuthUser } from "@/src/types/auth";
 
 export type CallState = "idle" | "calling" | "incoming" | "connected" | "ended";
-
 type StateListener = (state: CallState) => void;
 type StreamListener = (stream: MediaStream) => void;
 type IncomingListener = (data: IncomingCallPayload) => void;
+type ParticipantListener = (data: Record<string, unknown>) => void;
+type PeerStreamListener = (peerId: string, stream: MediaStream) => void;
 
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
@@ -19,95 +20,81 @@ const ICE_SERVERS: RTCConfiguration = {
   ],
 };
 
-function peerKey(id: string | null | undefined): string {
-  return (id ?? "").trim();
-}
+const getKey = (id: string | null | undefined) => (id ?? "").trim();
+const toCandidate = (map: Record<string, unknown>): RTCIceCandidateInit => ({
+  candidate: String(map.candidate ?? ""),
+  sdpMid: map.sdpMid != null ? String(map.sdpMid) : undefined,
+  sdpMLineIndex: map.sdpMLineIndex != null ? Number(map.sdpMLineIndex) : undefined,
+});
 
 function preferVp8Codec(desc: RTCSessionDescriptionInit): RTCSessionDescriptionInit {
   const sdp = desc.sdp;
   if (!sdp) return desc;
-
   const lines = sdp.split("\r\n");
   let mVideoIndex: number | null = null;
   const vp8Payloads: string[] = [];
-
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.startsWith("m=video ")) mVideoIndex = i;
-    const match = /^a=rtpmap:(\d+) VP8\/\d+/i.exec(line);
+    if (lines[i].startsWith("m=video ")) mVideoIndex = i;
+    const match = /^a=rtpmap:(\d+) VP8\/\d+/i.exec(lines[i]);
     if (match) vp8Payloads.push(match[1]);
   }
-
   if (mVideoIndex == null || vp8Payloads.length === 0) return desc;
-
-  const mParts = lines[mVideoIndex].split(" ");
-  if (mParts.length <= 3) return desc;
-
-  const header = mParts.slice(0, 3);
-  const payloads = mParts.slice(3);
-  const preferred: string[] = [];
-  const rest: string[] = [];
-
-  for (const p of payloads) {
-    if (vp8Payloads.includes(p)) preferred.push(p);
-    else rest.push(p);
-  }
-
-  lines[mVideoIndex] = [...header, ...preferred, ...rest].join(" ");
+  const parts = lines[mVideoIndex].split(" ");
+  if (parts.length <= 3) return desc;
+  const payloads = parts.slice(3);
+  const preferred = payloads.filter((p) => vp8Payloads.includes(p));
+  const rest = payloads.filter((p) => !vp8Payloads.includes(p));
+  lines[mVideoIndex] = [...parts.slice(0, 3), ...preferred, ...rest].join(" ");
   return { ...desc, sdp: lines.join("\r\n") };
-}
-
-function sdpConstraints(isVideo: boolean): RTCOfferOptions {
-  return {
-    offerToReceiveAudio: true,
-    offerToReceiveVideo: isVideo,
-  };
 }
 
 class CallService {
   private userId = "";
   private user: AuthUser | null = null;
   private initialized = false;
+  private state: CallState = "idle";
+  private stateListeners = new Set<StateListener>();
 
-  private pc: RTCPeerConnection | null = null;
   private localStream: MediaStream | null = null;
   private remoteStream: MediaStream | null = null;
+  private peerConnections = new Map<string, RTCPeerConnection>();
+  private pendingRemoteCandidates = new Map<string, RTCIceCandidateInit[]>();
+  private peerHasRemoteDescription = new Map<string, boolean>();
 
-  private pendingIce: RTCIceCandidateInit[] = [];
-  private hasRemoteDescription = false;
-
-  private state: CallState = "idle";
   private currentCallId: string | null = null;
   private currentConversationId: string | null = null;
   private currentPeerId: string | null = null;
-
   private isStartingCall = false;
-  private isVideoCall = false;
+  private isGroupCall = false;
+  private callMediaIsVideo = false;
   private callConnectedEmitted = false;
   private pendingRejectBeforeCallId = false;
   private pendingRejectConversationId: string | null = null;
   private pendingIncomingOffer: RTCSessionDescriptionInit | null = null;
   private pendingIncomingCallId: string | null = null;
 
-  private stateListeners = new Set<StateListener>();
   onIncomingCall: IncomingListener | null = null;
   onLocalStream: StreamListener | null = null;
   onRemoteStream: StreamListener | null = null;
+  onPeerRemoteStream: PeerStreamListener | null = null;
+  onParticipantJoined: ParticipantListener | null = null;
+  onParticipantLeft: ParticipantListener | null = null;
+  onCallStarted: ParticipantListener | null = null;
 
-  get callState(): CallState {
+  get callState() {
     return this.state;
   }
-
-  get localMediaStream(): MediaStream | null {
+  get localMediaStream() {
     return this.localStream;
   }
-
-  get remoteMediaStream(): MediaStream | null {
+  get remoteMediaStream() {
     return this.remoteStream;
   }
-
-  get currentCallIdValue(): string | null {
+  get currentCallIdValue() {
     return this.currentCallId;
+  }
+  get currentUserId() {
+    return this.userId;
   }
 
   init(user: AuthUser) {
@@ -128,37 +115,26 @@ class CallService {
     this.onIncomingCall = null;
     this.onLocalStream = null;
     this.onRemoteStream = null;
+    this.onPeerRemoteStream = null;
+    this.onParticipantJoined = null;
+    this.onParticipantLeft = null;
+    this.onCallStarted = null;
   }
 
   addStateListener(listener: StateListener) {
     this.stateListeners.add(listener);
     listener(this.state);
   }
-
   removeStateListener(listener: StateListener) {
     this.stateListeners.delete(listener);
   }
-
   private setState(next: CallState) {
     this.state = next;
     for (const l of this.stateListeners) l(next);
   }
 
-  private emitConnectedIfReady() {
-    if (this.callConnectedEmitted) return;
-    if (!this.currentCallId || !this.currentConversationId || !this.userId) return;
-    this.callConnectedEmitted = true;
-    socketService.emit(SOCKET_CALL_CLIENT.callConnected, {
-      callId: this.currentCallId,
-      conversationId: this.currentConversationId,
-      userId: this.userId,
-    });
-  }
-
   getStoredIncomingOffer(callId: string): RTCSessionDescriptionInit | undefined {
-    if (this.pendingIncomingCallId === callId && this.pendingIncomingOffer) {
-      return this.pendingIncomingOffer;
-    }
+    if (this.pendingIncomingCallId === callId && this.pendingIncomingOffer) return this.pendingIncomingOffer;
     if (typeof window === "undefined") return undefined;
     const raw = sessionStorage.getItem(`pending_call_offer_${callId}`);
     if (!raw) return undefined;
@@ -168,43 +144,29 @@ class CallService {
       return undefined;
     }
   }
-
   clearStoredIncomingOffer(callId: string) {
     if (this.pendingIncomingCallId === callId) {
-      this.pendingIncomingOffer = null;
       this.pendingIncomingCallId = null;
+      this.pendingIncomingOffer = null;
     }
-    if (typeof window !== "undefined") {
-      sessionStorage.removeItem(`pending_call_offer_${callId}`);
-    }
+    if (typeof window !== "undefined") sessionStorage.removeItem(`pending_call_offer_${callId}`);
   }
 
-  async startCall({
-    conversationId,
-    calleeId,
-    isVideo = false,
-  }: {
-    conversationId: string;
-    calleeId: string;
-    isVideo?: boolean;
-  }): Promise<void> {
+  async startCall(params: { conversationId: string; calleeId: string; isVideo?: boolean }) {
     if (this.isStartingCall) return;
     this.isStartingCall = true;
     this.cleanup();
-    this.setState("idle");
-
     try {
+      const { conversationId, calleeId, isVideo = false } = params;
       this.currentConversationId = conversationId;
       this.currentPeerId = calleeId;
-      this.isVideoCall = isVideo;
-
+      this.isGroupCall = false;
+      this.callMediaIsVideo = isVideo;
       await this.ensureLocalStream(isVideo);
       const pc = await this.createPeerConnection(calleeId, isVideo);
-
-      let offer = await pc.createOffer(sdpConstraints(isVideo));
+      let offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: isVideo });
       offer = preferVp8Codec(offer);
       await pc.setLocalDescription(offer);
-
       socketService.emit(SOCKET_CALL_CLIENT.startCall, {
         callDto: {
           conversationId,
@@ -216,61 +178,96 @@ class CallService {
         },
         offer: { sdp: offer.sdp, type: offer.type },
       });
-
       this.setState("calling");
-    } catch (e) {
-      console.error("[Call] startCall error:", e);
-      this.cleanup();
-      throw e;
     } finally {
       this.isStartingCall = false;
     }
   }
 
-  async answerCall({
-    conversationId,
-    callId,
-    peerId,
-    offer,
-    isVideo = false,
-  }: {
+  async startGroupCall(params: {
+    conversationId: string;
+    participantIds: string[];
+    isVideo?: boolean;
+  }) {
+    if (this.isStartingCall) return null;
+    this.isStartingCall = true;
+    this.cleanup();
+    try {
+      const { conversationId, participantIds, isVideo = false } = params;
+      this.currentConversationId = conversationId;
+      this.isGroupCall = true;
+      this.callMediaIsVideo = isVideo;
+      await this.ensureLocalStream(isVideo);
+      const offers: Array<{ targetId: string; offer: RTCSessionDescriptionInit }> = [];
+      for (const id of participantIds.map(getKey).filter(Boolean)) {
+        const pc = await this.createPeerConnection(id, isVideo);
+        let offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: isVideo });
+        offer = preferVp8Codec(offer);
+        await pc.setLocalDescription(offer);
+        offers.push({ targetId: id, offer: { sdp: offer.sdp, type: offer.type } });
+      }
+      socketService.emit(SOCKET_CALL_CLIENT.startCall, {
+        callDto: {
+          conversationId,
+          callerId: this.userId,
+          callerName: this.user?.fullName ?? "",
+          callerAvatar: this.user?.avatar ?? "",
+          participants: participantIds,
+          type: isVideo ? "VIDEO" : "VOICE",
+        },
+        offers,
+      });
+      this.setState("calling");
+      return this.currentCallId;
+    } finally {
+      this.isStartingCall = false;
+    }
+  }
+
+  async answerCall(params: {
     conversationId: string;
     callId: string;
     peerId: string;
     offer: RTCSessionDescriptionInit;
     isVideo?: boolean;
-  }): Promise<void> {
-    try {
-      this.currentConversationId = conversationId;
-      this.currentCallId = callId;
-      this.currentPeerId = peerId;
-      this.isVideoCall = isVideo;
+    isGroup?: boolean;
+  }) {
+    const { conversationId, callId, peerId, offer, isVideo = false, isGroup = false } = params;
+    this.currentConversationId = conversationId;
+    this.currentCallId = callId;
+    this.currentPeerId = peerId;
+    this.isGroupCall = isGroup;
+    this.callMediaIsVideo = isVideo;
+    await this.ensureLocalStream(isVideo);
+    const pc = await this.createPeerConnection(peerId, isVideo || this.callMediaIsVideo);
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    this.peerHasRemoteDescription.set(getKey(peerId), true);
+    await this.flushPendingIce(getKey(peerId), pc);
+    let answer = await pc.createAnswer({
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: isVideo || this.callMediaIsVideo,
+    });
+    answer = preferVp8Codec(answer);
+    await pc.setLocalDescription(answer);
+    socketService.emit(SOCKET_CALL_CLIENT.answerCall, {
+      conversationId,
+      callId,
+      answer: { sdp: answer.sdp, type: answer.type },
+      targetId: getKey(peerId),
+      sourceId: this.userId,
+    });
+    this.setState("calling");
+    if (isGroup) this.emitConnectedIfReady();
+  }
 
-      await this.ensureLocalStream(isVideo);
-      const pc = await this.createPeerConnection(peerId, isVideo);
-
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
-      this.hasRemoteDescription = true;
-      await this.flushPendingIce(pc);
-
-      let answer = await pc.createAnswer(sdpConstraints(isVideo));
-      answer = preferVp8Codec(answer);
-      await pc.setLocalDescription(answer);
-
-      socketService.emit(SOCKET_CALL_CLIENT.answerCall, {
-        conversationId,
-        callId,
-        answer: { sdp: answer.sdp, type: answer.type },
-        targetId: peerKey(peerId),
-        sourceId: this.userId,
-      });
-
-      this.setState("calling");
-    } catch (e) {
-      console.error("[Call] answerCall error:", e);
-      this.cleanup();
-      throw e;
-    }
+  async joinGroupCall(params: { conversationId: string; callId: string; isVideo?: boolean }) {
+    this.currentConversationId = params.conversationId;
+    this.currentCallId = params.callId;
+    this.isGroupCall = true;
+    this.callMediaIsVideo = params.isVideo === true;
+    await this.ensureLocalStream(this.callMediaIsVideo);
+    this.emitConnectedIfReady();
+    this.setState("calling");
   }
 
   rejectCall(callId: string, conversationId: string) {
@@ -279,24 +276,28 @@ class CallService {
     this.setState("ended");
   }
 
+  leaveCall() {
+    if (!this.isGroupCall) return this.endCall();
+    if (this.currentCallId && this.currentConversationId) {
+      socketService.emit(SOCKET_CALL_CLIENT.leaveCall, {
+        callId: this.currentCallId,
+        conversationId: this.currentConversationId,
+        userId: this.userId,
+      });
+    }
+    this.cleanup();
+    this.setState("ended");
+  }
+
   endCall() {
     if (this.state === "ended") return;
     const wasConnected = this.state === "connected";
-
     this.setState("ended");
-
     if (this.currentCallId && this.currentConversationId) {
-      if (wasConnected) {
-        socketService.emit(SOCKET_CALL_CLIENT.endCall, {
-          callId: this.currentCallId,
-          conversationId: this.currentConversationId,
-        });
-      } else {
-        socketService.emit(SOCKET_CALL_CLIENT.rejectCall, {
-          callId: this.currentCallId,
-          conversationId: this.currentConversationId,
-        });
-      }
+      socketService.emit(wasConnected ? SOCKET_CALL_CLIENT.endCall : SOCKET_CALL_CLIENT.rejectCall, {
+        callId: this.currentCallId,
+        conversationId: this.currentConversationId,
+      });
     } else if (this.currentConversationId && !wasConnected) {
       this.pendingRejectBeforeCallId = true;
       this.pendingRejectConversationId = this.currentConversationId;
@@ -305,20 +306,14 @@ class CallService {
         callerId: this.userId,
       });
     }
-
     this.cleanup();
   }
 
   toggleMute(mute: boolean) {
-    this.localStream?.getAudioTracks().forEach((t) => {
-      t.enabled = !mute;
-    });
+    this.localStream?.getAudioTracks().forEach((t) => (t.enabled = !mute));
   }
-
   toggleVideo(enabled: boolean) {
-    this.localStream?.getVideoTracks().forEach((t) => {
-      t.enabled = enabled;
-    });
+    this.localStream?.getVideoTracks().forEach((t) => (t.enabled = enabled));
   }
 
   private registerSocketHandlers() {
@@ -328,8 +323,12 @@ class CallService {
     socketService.on(SOCKET_CALL_SERVER.iceCandidate, this.onIceCandidate);
     socketService.on(SOCKET_CALL_SERVER.callEnded, this.onCallEnded);
     socketService.on(SOCKET_CALL_SERVER.callRejected, this.onCallRejected);
+    socketService.on(SOCKET_CALL_SERVER.callOffer, this.onCallOffer);
+    socketService.on(SOCKET_CALL_SERVER.participantJoined, this.onParticipantJoinedEvent);
+    socketService.on(SOCKET_CALL_SERVER.participantLeft, this.onParticipantLeftEvent);
+    socketService.on(SOCKET_CALL_SERVER.activeParticipants, this.onActiveParticipantsEvent);
+    socketService.on(SOCKET_CALL_SERVER.callStarted, this.onCallStartedEvent);
   }
-
   private disposeSocketHandlers() {
     socketService.off(SOCKET_CALL_SERVER.incomingCall, this.onIncomingCallEvent);
     socketService.off(SOCKET_CALL_SERVER.callCreated, this.onCallCreated);
@@ -337,6 +336,11 @@ class CallService {
     socketService.off(SOCKET_CALL_SERVER.iceCandidate, this.onIceCandidate);
     socketService.off(SOCKET_CALL_SERVER.callEnded, this.onCallEnded);
     socketService.off(SOCKET_CALL_SERVER.callRejected, this.onCallRejected);
+    socketService.off(SOCKET_CALL_SERVER.callOffer, this.onCallOffer);
+    socketService.off(SOCKET_CALL_SERVER.participantJoined, this.onParticipantJoinedEvent);
+    socketService.off(SOCKET_CALL_SERVER.participantLeft, this.onParticipantLeftEvent);
+    socketService.off(SOCKET_CALL_SERVER.activeParticipants, this.onActiveParticipantsEvent);
+    socketService.off(SOCKET_CALL_SERVER.callStarted, this.onCallStartedEvent);
   }
 
   private onIncomingCallEvent = (data: unknown) => {
@@ -350,30 +354,16 @@ class CallService {
       type: map.type === "VIDEO" ? "VIDEO" : "VOICE",
       offer: map.offer as RTCSessionDescriptionInit | undefined,
       isGroup: map.isGroup === true,
-      participants: Array.isArray(map.participants)
-        ? map.participants.map((p) => String(p))
-        : undefined,
+      participants: Array.isArray(map.participants) ? map.participants.map((p) => String(p)) : undefined,
       groupName: map.groupName != null ? String(map.groupName) : undefined,
       groupAvatar: map.groupAvatar != null ? String(map.groupAvatar) : undefined,
     };
-
-    if (payload.offer && payload.callId) {
+    if (payload.offer && payload.callId && typeof window !== "undefined") {
       this.pendingIncomingOffer = payload.offer;
       this.pendingIncomingCallId = payload.callId;
-      if (typeof window !== "undefined") {
-        sessionStorage.setItem(
-          `pending_call_offer_${payload.callId}`,
-          JSON.stringify(payload.offer)
-        );
-      }
+      sessionStorage.setItem(`pending_call_offer_${payload.callId}`, JSON.stringify(payload.offer));
     }
-
-    if (payload.isGroup) {
-      this.onIncomingCall?.(payload);
-      return;
-    }
-
-    this.setState("incoming");
+    if (!payload.isGroup) this.setState("incoming");
     this.onIncomingCall?.(payload);
   };
 
@@ -381,7 +371,6 @@ class CallService {
     const map = data as Record<string, unknown>;
     const callId = String(map.callId ?? "");
     if (callId) this.currentCallId = callId;
-
     const createdConversationId = String(map.conversationId ?? "");
     if (
       this.pendingRejectBeforeCallId &&
@@ -401,23 +390,19 @@ class CallService {
   private onCallAnswered = async (data: unknown) => {
     try {
       const map = data as Record<string, unknown>;
-      const groupReject = map.isGroup === true;
-      if (groupReject) return;
-
-      const pc = this.pc;
+      const responderId = getKey(String(map.responderId ?? map.sourceId ?? this.currentPeerId ?? ""));
+      const pc = this.findPeerConnection(responderId);
       if (!pc) return;
-
       const answerMap = map.answer as Record<string, unknown> | undefined;
       if (!answerMap) return;
-
       const answer: RTCSessionDescriptionInit = {
         sdp: String(answerMap.sdp ?? ""),
         type: (answerMap.type as RTCSdpType) ?? "answer",
       };
-
       await pc.setRemoteDescription(new RTCSessionDescription(answer));
-      this.hasRemoteDescription = true;
-      await this.flushPendingIce(pc);
+      const key = responderId || "default";
+      this.peerHasRemoteDescription.set(key, true);
+      await this.flushPendingIce(key, pc);
     } catch (e) {
       console.error("[Call] call_answered error:", e);
     }
@@ -426,38 +411,68 @@ class CallService {
   private onIceCandidate = async (data: unknown) => {
     try {
       const map = data as Record<string, unknown>;
-      const targetId = peerKey(map.targetId as string);
-      if (targetId && targetId !== peerKey(this.userId)) return;
-
-      const candidate: RTCIceCandidateInit = {
-        candidate: String(map.candidate ?? ""),
-        sdpMid: map.sdpMid != null ? String(map.sdpMid) : undefined,
-        sdpMLineIndex:
-          map.sdpMLineIndex != null ? Number(map.sdpMLineIndex) : undefined,
-      };
-
-      const pc = this.pc;
-      if (!pc) {
-        this.pendingIce.push(candidate);
+      const targetId = getKey(String(map.targetId ?? ""));
+      if (targetId && targetId !== getKey(this.userId)) return;
+      const sourceId = getKey(String(map.sourceId ?? ""));
+      const peerId = sourceId || this.currentPeerId || "default";
+      const candidate = toCandidate(map);
+      const pc = this.findPeerConnection(peerId);
+      if (!pc || !this.peerHasRemoteDescription.get(peerId)) {
+        this.pendingRemoteCandidates.set(peerId, [...(this.pendingRemoteCandidates.get(peerId) ?? []), candidate]);
         return;
       }
-
-      if (!this.hasRemoteDescription) {
-        this.pendingIce.push(candidate);
-        return;
-      }
-
       await pc.addIceCandidate(new RTCIceCandidate(candidate));
     } catch (e) {
       console.error("[Call] ice_candidate error:", e);
     }
   };
 
+  private onCallOffer = async (data: unknown) => {
+    try {
+      const map = data as Record<string, unknown>;
+      const targetId = getKey(String(map.targetId ?? ""));
+      if (targetId && targetId !== getKey(this.userId)) return;
+      const sourceId = getKey(String(map.sourceId ?? ""));
+      if (!sourceId || sourceId === getKey(this.userId)) return;
+      const offerMap = (map.offer as Record<string, unknown>) ?? {};
+      const offer: RTCSessionDescriptionInit = {
+        sdp: String(offerMap.sdp ?? ""),
+        type: (offerMap.type as RTCSdpType) ?? "offer",
+      };
+      this.currentCallId = this.currentCallId ?? String(map.callId ?? "");
+      await this.answerPeerOffer(sourceId, offer);
+    } catch (e) {
+      console.error("[Call] call_offer error:", e);
+    }
+  };
+
+  private onParticipantJoinedEvent = (data: unknown) => {
+    const map = data as Record<string, unknown>;
+    this.onParticipantJoined?.(map);
+    const joinedId = getKey(String(map.userId ?? ""));
+    if (this.isGroupCall) this.ensureMeshToPeer(joinedId);
+  };
+  private onParticipantLeftEvent = (data: unknown) => {
+    this.onParticipantLeft?.(data as Record<string, unknown>);
+  };
+  private onActiveParticipantsEvent = (data: unknown) => {
+    const map = data as Record<string, unknown>;
+    const ids = Array.isArray(map.activeParticipants) ? map.activeParticipants.map((id) => String(id)) : [];
+    for (const id of ids) {
+      const key = getKey(id);
+      if (!key || key === getKey(this.userId)) continue;
+      this.onParticipantJoined?.({ userId: key });
+      if (this.isGroupCall) this.ensureMeshToPeer(key);
+    }
+  };
+  private onCallStartedEvent = (data: unknown) => {
+    this.onCallStarted?.(data as Record<string, unknown>);
+  };
+
   private onCallEnded = () => {
     this.cleanup();
     this.setState("ended");
   };
-
   private onCallRejected = (data: unknown) => {
     const map = data as Record<string, unknown>;
     if (map.isGroup === true) return;
@@ -465,56 +480,49 @@ class CallService {
     this.setState("ended");
   };
 
+  private emitConnectedIfReady() {
+    if (this.callConnectedEmitted) return;
+    if (!this.currentCallId || !this.currentConversationId || !this.userId) return;
+    this.callConnectedEmitted = true;
+    socketService.emit(SOCKET_CALL_CLIENT.callConnected, {
+      callId: this.currentCallId,
+      conversationId: this.currentConversationId,
+      userId: this.userId,
+    });
+  }
+
   private async ensureLocalStream(isVideo: boolean) {
     if (this.localStream) return;
-
     if (isVideo) {
       try {
-        this.localStream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: { facingMode: "user" },
-        });
+        this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: "user" } });
       } catch {
         try {
-          this.localStream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-            video: true,
-          });
+          this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
         } catch {
-          this.localStream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-            video: false,
-          });
+          this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         }
       }
     } else {
-      this.localStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: false,
-      });
+      this.localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
     }
-
-    if (this.pc && this.localStream) {
-      for (const track of this.localStream.getTracks()) {
-        this.pc.addTrack(track, this.localStream);
-      }
-    }
-
     this.onLocalStream?.(this.localStream);
   }
 
-  private async createPeerConnection(peerId: string, _isVideo: boolean): Promise<RTCPeerConnection> {
+  private findPeerConnection(peerId: string) {
+    const key = getKey(peerId);
+    if (key && this.peerConnections.has(key)) return this.peerConnections.get(key) ?? null;
+    return this.peerConnections.values().next().value ?? null;
+  }
+
+  private async createPeerConnection(peerId: string, isVideo: boolean) {
+    const key = getKey(peerId) || "default";
+    if (this.peerConnections.has(key)) return this.peerConnections.get(key)!;
     const pc = new RTCPeerConnection(ICE_SERVERS);
-    this.pc = pc;
-    this.hasRemoteDescription = false;
-    this.pendingIce = [];
-
-    if (this.localStream) {
-      for (const track of this.localStream.getTracks()) {
-        pc.addTrack(track, this.localStream);
-      }
-    }
-
+    this.peerConnections.set(key, pc);
+    this.peerHasRemoteDescription.set(key, false);
+    this.pendingRemoteCandidates.set(key, []);
+    if (this.localStream) this.localStream.getTracks().forEach((t) => pc.addTrack(t, this.localStream!));
     pc.onicecandidate = (event) => {
       if (!event.candidate?.candidate) return;
       socketService.emit(SOCKET_CALL_CLIENT.iceCandidate, {
@@ -522,80 +530,118 @@ class CallService {
         candidate: event.candidate.candidate,
         sdpMid: event.candidate.sdpMid,
         sdpMLineIndex: event.candidate.sdpMLineIndex,
-        targetId: peerKey(peerId),
+        targetId: key,
         sourceId: this.userId,
       });
     };
-
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "connected") {
         this.emitConnectedIfReady();
         if (this.state !== "connected") this.setState("connected");
-      } else if (
-        pc.connectionState === "disconnected" ||
-        pc.connectionState === "failed"
-      ) {
+      } else if ((pc.connectionState === "disconnected" || pc.connectionState === "failed") && !this.isGroupCall) {
         this.endCall();
       }
     };
-
     pc.ontrack = (event) => {
-      const stream =
-        event.streams[0] ??
-        (() => {
-          const s = new MediaStream();
-          s.addTrack(event.track);
-          return s;
-        })();
-
+      const stream = event.streams[0] ?? (() => {
+        const s = new MediaStream();
+        s.addTrack(event.track);
+        return s;
+      })();
       this.remoteStream = stream;
+      if (this.isGroupCall) this.onPeerRemoteStream?.(key, stream);
       this.onRemoteStream?.(stream);
-
       if (this.state === "calling") {
         this.emitConnectedIfReady();
         this.setState("connected");
       }
     };
-
+    if (isVideo && this.localStream?.getVideoTracks().length === 0) {
+      this.callMediaIsVideo = true;
+    }
     return pc;
   }
 
-  private async flushPendingIce(pc: RTCPeerConnection) {
-    const pending = [...this.pendingIce];
-    this.pendingIce = [];
+  private async flushPendingIce(peerId: string, pc: RTCPeerConnection) {
+    const pending = [...(this.pendingRemoteCandidates.get(peerId) ?? [])];
+    this.pendingRemoteCandidates.set(peerId, []);
     for (const c of pending) {
       try {
         await pc.addIceCandidate(new RTCIceCandidate(c));
-      } catch (e) {
-        console.warn("[Call] flush ICE failed:", e);
+      } catch {
+        // ignore invalid ICE candidate
       }
     }
+  }
+
+  private shouldInitiateOfferWith(peerId: string) {
+    const myId = getKey(this.userId);
+    return Boolean(myId && peerId && myId !== peerId && myId < peerId);
+  }
+  private ensureMeshToPeer(peerId: string) {
+    const key = getKey(peerId);
+    if (!key || key === getKey(this.userId) || this.peerConnections.has(key)) return;
+    if (this.shouldInitiateOfferWith(key)) void this.createOfferForPeer(key);
+  }
+  private async createOfferForPeer(peerId: string) {
+    const key = getKey(peerId);
+    if (!this.isGroupCall || !key || !this.currentConversationId) return;
+    await this.ensureLocalStream(this.callMediaIsVideo);
+    const pc = await this.createPeerConnection(key, this.callMediaIsVideo);
+    let offer = await pc.createOffer({
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: this.callMediaIsVideo,
+    });
+    offer = preferVp8Codec(offer);
+    await pc.setLocalDescription(offer);
+    socketService.emit(SOCKET_CALL_CLIENT.callOffer, {
+      conversationId: this.currentConversationId,
+      callId: this.currentCallId,
+      targetId: key,
+      sourceId: this.userId,
+      offer: { sdp: offer.sdp, type: offer.type },
+    });
+  }
+  private async answerPeerOffer(peerId: string, offer: RTCSessionDescriptionInit) {
+    if (!this.isGroupCall) return;
+    const key = getKey(peerId);
+    await this.ensureLocalStream(this.callMediaIsVideo);
+    const pc = await this.createPeerConnection(key, this.callMediaIsVideo);
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    this.peerHasRemoteDescription.set(key, true);
+    await this.flushPendingIce(key, pc);
+    let answer = await pc.createAnswer({
+      offerToReceiveAudio: true,
+      offerToReceiveVideo: this.callMediaIsVideo,
+    });
+    answer = preferVp8Codec(answer);
+    await pc.setLocalDescription(answer);
+    socketService.emit(SOCKET_CALL_CLIENT.answerCall, {
+      conversationId: this.currentConversationId,
+      callId: this.currentCallId,
+      answer: { sdp: answer.sdp, type: answer.type },
+      targetId: key,
+      sourceId: this.userId,
+    });
   }
 
   private cleanup() {
     this.localStream?.getTracks().forEach((t) => t.stop());
     this.localStream = null;
-
     this.remoteStream = null;
-
-    if (this.pc) {
-      this.pc.close();
-      this.pc = null;
-    }
-
-    this.pendingIce = [];
-    this.hasRemoteDescription = false;
+    this.peerConnections.forEach((pc) => pc.close());
+    this.peerConnections.clear();
+    this.pendingRemoteCandidates.clear();
+    this.peerHasRemoteDescription.clear();
     this.currentCallId = null;
     this.currentConversationId = null;
     this.currentPeerId = null;
-    this.isVideoCall = false;
+    this.isGroupCall = false;
+    this.callMediaIsVideo = false;
     this.callConnectedEmitted = false;
     this.pendingRejectBeforeCallId = false;
     this.pendingRejectConversationId = null;
-
-    if (this.state !== "ended") {
-      this.state = "idle";
-    }
+    if (this.state !== "ended") this.state = "idle";
   }
 }
 

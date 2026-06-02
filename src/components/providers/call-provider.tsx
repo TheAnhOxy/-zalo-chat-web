@@ -51,7 +51,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }, [dismissIncoming, incoming]);
 
   const handleAccept = useCallback(() => {
-    if (!incoming || incoming.isGroup) return;
+    if (!incoming) return;
     const type = incoming.type === "VIDEO" ? "video" : "voice";
     const params = new URLSearchParams({
       type,
@@ -60,6 +60,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       callerId: incoming.callerId,
       autoAnswer: "1",
     });
+    if (incoming.isGroup) params.set("group", "1");
     if (incoming.callerName) params.set("callerName", incoming.callerName);
     if (incoming.callerAvatar) params.set("callerAvatar", incoming.callerAvatar);
 

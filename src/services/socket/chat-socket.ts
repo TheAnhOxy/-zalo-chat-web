@@ -19,6 +19,15 @@ export type ChatSocketHandlers = {
   onMessageUpdated?: (message: IMessage) => void;
   onMessageRecalled?: (data: { messageId: string; conversationId: string }) => void;
   onMessagePinnedUpdate?: (data: { conversationId: string; messageId?: string; isPinned?: boolean }) => void;
+  onConversationCallUpdated?: (data: {
+    conversationId: string;
+    lastMessage?: {
+      content?: string;
+      senderId?: string;
+      createdAt?: string;
+    };
+    callData?: Record<string, unknown>;
+  }) => void;
   onReconnect?: () => void;
 };
 
@@ -112,6 +121,26 @@ export class ChatSocket {
       }
     };
 
+    const conversationCallUpdated = (...args: unknown[]) => {
+      const data = args[0] as Record<string, unknown>;
+      if (!data?.conversationId) return;
+      this.handlers.onConversationCallUpdated?.({
+        conversationId: String(data.conversationId),
+        lastMessage:
+          data.lastMessage && typeof data.lastMessage === "object"
+            ? {
+                content: String((data.lastMessage as Record<string, unknown>).content ?? ""),
+                senderId: String((data.lastMessage as Record<string, unknown>).senderId ?? ""),
+                createdAt: String((data.lastMessage as Record<string, unknown>).createdAt ?? ""),
+              }
+            : undefined,
+        callData:
+          data.callData && typeof data.callData === "object"
+            ? (data.callData as Record<string, unknown>)
+            : undefined,
+      });
+    };
+
     const pairs: Array<[string, (...args: unknown[]) => void]> = [
       [SOCKET_SERVER.newMessage, receive],
       [SOCKET_SERVER.messageSeen, messageSeen],
@@ -121,6 +150,7 @@ export class ChatSocket {
       [SOCKET_SERVER.messageUpdated, updated],
       [SOCKET_SERVER.messageDeleted, (...a) => recalled(a[0] as Parameters<typeof recalled>[0])],
       [SOCKET_SERVER.messagePinnedUpdate, pinnedUpdate as (...args: unknown[]) => void],
+      [SOCKET_SERVER.conversationCallUpdated, conversationCallUpdated],
     ];
 
     for (const [event, fn] of pairs) {

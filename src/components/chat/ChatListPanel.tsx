@@ -190,11 +190,58 @@ export function ChatListPanel({
     [sortedConversations, userId, profileMap, pinnedIds, onlineStates]
   );
 
+  // "HÔM NAY" section - conversations from today with calls
+  const todayCallItems = useMemo(() => {
+    if (search.trim()) return []; // Don't show today section when searching
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+
+    return listItems
+      .filter((item) => {
+        const timestamp = item.sortTimestamp;
+        // Check if timestamp is within today
+        return timestamp >= todayStart.getTime() && timestamp < todayEnd.getTime();
+      })
+      .sort((a, b) => b.sortTimestamp - a.sortTimestamp)
+      .slice(0, 5); // Show max 5 items in today section
+  }, [listItems, search]);
+
+  // "LỊCH SỬ" section - call history (older than today)
+  const historyCallItems = useMemo(() => {
+    if (search.trim()) return []; // Don't show history section when searching
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+    return listItems
+      .filter((item) => {
+        const timestamp = item.sortTimestamp;
+        // Show all items older than today (call history)
+        return timestamp < todayStart.getTime();
+      })
+      .sort((a, b) => b.sortTimestamp - a.sortTimestamp)
+      .slice(0, 10); // Show max 10 items in history section
+  }, [listItems, search]);
+
   const filteredItems = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    if (!keyword) return listItems;
-    return listItems.filter((item) => item.name.toLowerCase().includes(keyword));
-  }, [listItems, search]);
+    let items = listItems;
+    if (!keyword) {
+      items = listItems;
+    } else {
+      items = listItems.filter((item) => item.name.toLowerCase().includes(keyword));
+    }
+    
+    // Exclude today items and history items from main list to avoid duplicates
+    if (!keyword && (todayCallItems.length > 0 || historyCallItems.length > 0)) {
+      const excludeIds = new Set([
+        ...todayCallItems.map((i) => i.id),
+        ...historyCallItems.map((i) => i.id),
+      ]);
+      return items.filter((item) => !excludeIds.has(item.id));
+    }
+    return items;
+  }, [listItems, search, todayCallItems, historyCallItems]);
 
   const activeUsers = useMemo(() => {
     const map = new Map<string, ActiveUser>();
@@ -396,11 +443,15 @@ export function ChatListPanel({
           </div>
         )}
 
-        {/* AI card — mobile _buildAiCard */}
+        {isLoading && listItems.length === 0 ? (
+          <div className="px-5 py-8 text-center text-sm text-[var(--qc-text-secondary)]">Đang tải hội thoại...</div>
+        ) : null}
+
+        {/* AI card — move to top */}
         <button
           type="button"
           onClick={() => setShowAiSheet(true)}
-          className="mx-4 mb-2 flex w-[calc(100%-32px)] items-center gap-3 rounded-2xl border border-[var(--qc-primary)]/25 bg-gradient-to-br from-[#1a3a1a] to-[#1f4a1f] px-3.5 py-3 text-left transition hover:brightness-110"
+          className="mx-4 mt-3 mb-3 flex w-[calc(100%-32px)] items-center gap-3 rounded-2xl border border-[var(--qc-primary)]/25 bg-gradient-to-br from-[#1a3a1a] to-[#1f4a1f] px-3.5 py-3 text-left transition hover:brightness-110"
         >
           <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-[var(--qc-primary-dark)] to-[var(--qc-primary)] text-white">
             <Sparkles className="h-5 w-5" />
@@ -412,8 +463,134 @@ export function ChatListPanel({
           <ChevronRight className="h-5 w-5 shrink-0 text-white/50" />
         </button>
 
-        {isLoading && listItems.length === 0 ? (
-          <div className="px-5 py-8 text-center text-sm text-[var(--qc-text-secondary)]">Đang tải hội thoại...</div>
+        {/* "HÔM NAY" section */}
+        {!search.trim() && todayCallItems.length > 0 ? (
+          <div className="mb-2">
+            <div className="mx-4 mt-3 mb-2 text-xs font-bold text-[var(--qc-text-secondary)] uppercase tracking-wider">
+              HÔM NAY
+            </div>
+            {todayCallItems.map((item) => {
+              const hasUnread = item.unreadCount > 0;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => handleOpenConversation(item.id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setContextMenu(item);
+                  }}
+                  className={`mx-3 my-0.5 grid w-[calc(100%-24px)] grid-cols-[52px_1fr_auto] gap-3 rounded-[14px] px-3 py-2.5 text-left transition ${
+                    activeConversationId === item.id
+                      ? "bg-white shadow-sm"
+                      : hasUnread
+                        ? "bg-[var(--qc-primary-light)]"
+                        : "bg-transparent hover:bg-white/80"
+                  }`}
+                >
+                  <AvatarWidget
+                    url={item.avatar}
+                    name={item.name}
+                    size={52}
+                    showOnline={!item.isGroup}
+                    isOnline={item.online}
+                  />
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <p
+                        className={`min-w-0 flex-1 truncate text-[15px] text-[var(--qc-text-primary)] ${
+                          hasUnread ? "font-bold" : "font-semibold"
+                        }`}
+                      >
+                        {item.name}
+                      </p>
+                      {item.isPinned ? <Pin className="h-4 w-4 shrink-0 text-[var(--qc-primary)]" /> : null}
+                    </div>
+                    <p
+                      className={`truncate text-[13px] ${
+                        item.isMissedCall ? "font-medium text-red-600" : "text-[var(--qc-text-secondary)]"
+                      }`}
+                    >
+                      {item.lastMessage}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    <span className="text-xs text-[var(--qc-text-secondary)]">{item.time}</span>
+                    {hasUnread ? (
+                      <span className="rounded-full bg-[var(--qc-primary)] px-2 py-0.5 text-[10px] font-bold text-white">
+                        {item.unreadCount}
+                      </span>
+                    ) : null}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+
+        {/* "LỊCH SỬ" section - call history */}
+        {!search.trim() && historyCallItems.length > 0 ? (
+          <div className="mb-2">
+            <div className="mx-4 mt-3 mb-2 text-xs font-bold text-[var(--qc-text-secondary)] uppercase tracking-wider">
+              LỊCH SỬ
+            </div>
+            {historyCallItems.map((item) => {
+              const hasUnread = item.unreadCount > 0;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => handleOpenConversation(item.id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setContextMenu(item);
+                  }}
+                  className={`mx-3 my-0.5 grid w-[calc(100%-24px)] grid-cols-[52px_1fr_auto] gap-3 rounded-[14px] px-3 py-2.5 text-left transition ${
+                    activeConversationId === item.id
+                      ? "bg-white shadow-sm"
+                      : hasUnread
+                        ? "bg-[var(--qc-primary-light)]"
+                        : "bg-transparent hover:bg-white/80"
+                  }`}
+                >
+                  <AvatarWidget
+                    url={item.avatar}
+                    name={item.name}
+                    size={52}
+                    showOnline={!item.isGroup}
+                    isOnline={item.online}
+                  />
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <p
+                        className={`min-w-0 flex-1 truncate text-[15px] text-[var(--qc-text-primary)] ${
+                          hasUnread ? "font-bold" : "font-semibold"
+                        }`}
+                      >
+                        {item.name}
+                      </p>
+                      {item.isPinned ? <Pin className="h-4 w-4 shrink-0 text-[var(--qc-primary)]" /> : null}
+                    </div>
+                    <p
+                      className={`truncate text-[13px] ${
+                        item.isMissedCall ? "font-medium text-red-600" : "text-[var(--qc-text-secondary)]"
+                      }`}
+                    >
+                      {item.lastMessage}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    <span className="text-xs text-[var(--qc-text-secondary)]">{item.time}</span>
+                    {hasUnread ? (
+                      <span className="rounded-full bg-[var(--qc-primary)] px-2 py-0.5 text-[10px] font-bold text-white">
+                        {item.unreadCount}
+                      </span>
+                    ) : null}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         ) : null}
 
         {filteredItems.map((item) => {
@@ -473,7 +650,7 @@ export function ChatListPanel({
           );
         })}
 
-        {!isLoading && filteredItems.length === 0 ? (
+        {!isLoading && filteredItems.length === 0 && todayCallItems.length === 0 && historyCallItems.length === 0 ? (
           <div className="px-5 py-10 text-center text-sm text-[var(--qc-text-secondary)]">
             {search.trim() ? "Không tìm thấy cuộc trò chuyện" : "Chưa có cuộc trò chuyện nào"}
           </div>
