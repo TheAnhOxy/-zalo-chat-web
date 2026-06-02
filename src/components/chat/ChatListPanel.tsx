@@ -190,11 +190,39 @@ export function ChatListPanel({
     [sortedConversations, userId, profileMap, pinnedIds, onlineStates]
   );
 
+  // "HÔM NAY" section - conversations from today with calls
+  const todayCallItems = useMemo(() => {
+    if (search.trim()) return []; // Don't show today section when searching
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+
+    return listItems
+      .filter((item) => {
+        const timestamp = item.sortTimestamp;
+        // Check if timestamp is within today
+        return timestamp >= todayStart.getTime() && timestamp < todayEnd.getTime();
+      })
+      .sort((a, b) => b.sortTimestamp - a.sortTimestamp)
+      .slice(0, 5); // Show max 5 items in today section
+  }, [listItems, search]);
+
   const filteredItems = useMemo(() => {
     const keyword = search.trim().toLowerCase();
-    if (!keyword) return listItems;
-    return listItems.filter((item) => item.name.toLowerCase().includes(keyword));
-  }, [listItems, search]);
+    let items = listItems;
+    if (!keyword) {
+      items = listItems;
+    } else {
+      items = listItems.filter((item) => item.name.toLowerCase().includes(keyword));
+    }
+    
+    // Exclude today items from main list to avoid duplicates
+    if (!keyword && todayCallItems.length > 0) {
+      const todayIds = new Set(todayCallItems.map((i) => i.id));
+      return items.filter((item) => !todayIds.has(item.id));
+    }
+    return items;
+  }, [listItems, search, todayCallItems]);
 
   const activeUsers = useMemo(() => {
     const map = new Map<string, ActiveUser>();
@@ -395,6 +423,71 @@ export function ChatListPanel({
             {refreshing ? "Đang tải lại..." : pullDistance >= 48 ? "Thả để tải lại" : "Kéo để tải lại"}
           </div>
         )}
+
+        {/* "HÔM NAY" section */}
+        {!search.trim() && todayCallItems.length > 0 ? (
+          <div className="mb-2">
+            <div className="mx-4 mt-3 mb-2 text-xs font-bold text-[var(--qc-text-secondary)] uppercase tracking-wider">
+              HÔM NAY
+            </div>
+            {todayCallItems.map((item) => {
+              const hasUnread = item.unreadCount > 0;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => handleOpenConversation(item.id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setContextMenu(item);
+                  }}
+                  className={`mx-3 my-0.5 grid w-[calc(100%-24px)] grid-cols-[52px_1fr_auto] gap-3 rounded-[14px] px-3 py-2.5 text-left transition ${
+                    activeConversationId === item.id
+                      ? "bg-white shadow-sm"
+                      : hasUnread
+                        ? "bg-[var(--qc-primary-light)]"
+                        : "bg-transparent hover:bg-white/80"
+                  }`}
+                >
+                  <AvatarWidget
+                    url={item.avatar}
+                    name={item.name}
+                    size={52}
+                    showOnline={!item.isGroup}
+                    isOnline={item.online}
+                  />
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-center gap-1.5">
+                      <p
+                        className={`min-w-0 flex-1 truncate text-[15px] text-[var(--qc-text-primary)] ${
+                          hasUnread ? "font-bold" : "font-semibold"
+                        }`}
+                      >
+                        {item.name}
+                      </p>
+                      {item.isPinned ? <Pin className="h-4 w-4 shrink-0 text-[var(--qc-primary)]" /> : null}
+                    </div>
+                    <p
+                      className={`truncate text-[13px] ${
+                        item.isMissedCall ? "font-medium text-red-600" : "text-[var(--qc-text-secondary)]"
+                      }`}
+                    >
+                      {item.lastMessage}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-2">
+                    <span className="text-xs text-[var(--qc-text-secondary)]">{item.time}</span>
+                    {hasUnread ? (
+                      <span className="rounded-full bg-[var(--qc-primary)] px-2 py-0.5 text-[10px] font-bold text-white">
+                        {item.unreadCount}
+                      </span>
+                    ) : null}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
 
         {/* AI card — mobile _buildAiCard */}
         <button

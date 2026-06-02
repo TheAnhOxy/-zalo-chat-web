@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Mic, MicOff, PhoneOff, Video, VideoOff } from "lucide-react";
+import { Mic, MicOff, PhoneOff, Video, VideoOff, Volume2, VolumeOff } from "lucide-react";
 import { AvatarWidget } from "@/src/components/common/AvatarWidget";
 import { callService, CallState } from "@/src/services/call/call-service";
 
@@ -56,6 +56,7 @@ export function GroupCallScreen({
   const [seconds, setSeconds] = useState(0);
   const [muted, setMuted] = useState(false);
   const [camOff, setCamOff] = useState(false);
+  const [speakerOn, setSpeakerOn] = useState(true);
   const [connectedIds, setConnectedIds] = useState<Set<string>>(new Set());
   const [streams, setStreams] = useState<Record<string, MediaStream>>({});
   const [error, setError] = useState<string | null>(null);
@@ -90,8 +91,26 @@ export function GroupCallScreen({
         });
       }
     }
-    return [...map.values()];
-  }, [connectedIds, participants, streams]);
+    // Filter out current user when connected
+    const myId = callService.currentUserId?.trim();
+    const result = [...map.values()];
+    if (state === "connected" && myId) {
+      return result.filter((p) => p.userId?.trim() !== myId);
+    }
+    return result;
+  }, [connectedIds, participants, state, streams]);
+
+  // Calculate responsive grid layout based on participant count
+  const gridLayout = useMemo(() => {
+    const count = meAndPeers.length;
+    if (count <= 1) return { cols: 1, rows: 1 };
+    if (count === 2) return { cols: 2, rows: 1 };
+    if (count === 3) return { cols: 3, rows: 1 };
+    if (count === 4) return { cols: 2, rows: 2 };
+    if (count <= 6) return { cols: 3, rows: 2 };
+    if (count <= 9) return { cols: 3, rows: 3 };
+    return { cols: 4, rows: Math.ceil(count / 4) };
+  }, [meAndPeers.length]);
 
   const goBack = useCallback(() => {
     if (closingRef.current) return;
@@ -237,34 +256,50 @@ export function GroupCallScreen({
         </p>
       </div>
 
-      <div className="mt-4 grid flex-1 grid-cols-2 gap-3 overflow-auto px-4 pb-36">
-        {meAndPeers.map((peer) => {
-          const stream = streams[peer.userId];
-          const connected = connectedIds.has(peer.userId);
-          const hasVideo = Boolean(stream?.getVideoTracks().some((t) => t.enabled));
-          return (
-            <div key={peer.userId} className="relative aspect-3/4 overflow-hidden rounded-xl bg-[#1a202c]">
-              {hasVideo ? (
-                <video
-                  ref={(el) => {
-                    videoRefs.current[peer.userId] = el;
-                  }}
-                  autoPlay
-                  playsInline
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <div className="flex h-full flex-col items-center justify-center gap-2">
-                  <AvatarWidget url={peer.avatar} name={peer.name} size={52} />
-                  <p className="max-w-[90%] truncate text-xs">{peer.name}</p>
-                  <p className={`text-[10px] ${connected ? "text-emerald-300" : "text-white/50"}`}>
-                    {connected ? "Đã vào" : "Chưa tham gia"}
-                  </p>
-                </div>
-              )}
-            </div>
-          );
-        })}
+      <div className="mt-4 flex flex-1 flex-col items-center justify-center px-4 pb-32">
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(${gridLayout.cols}, minmax(0, 1fr))`,
+            gap: "12px",
+            width: "100%",
+            height: "100%",
+            maxHeight: `calc(100vh - 280px)`,
+            overflow: "hidden",
+          }}
+        >
+          {meAndPeers.map((peer) => {
+            const stream = streams[peer.userId];
+            const connected = connectedIds.has(peer.userId);
+            const hasVideo = Boolean(stream?.getVideoTracks().some((t) => t.enabled));
+            return (
+              <div
+                key={peer.userId}
+                className="relative flex overflow-hidden rounded-xl bg-[#1a202c]"
+                style={{ aspectRatio: "3/4" }}
+              >
+                {hasVideo ? (
+                  <video
+                    ref={(el) => {
+                      videoRefs.current[peer.userId] = el;
+                    }}
+                    autoPlay
+                    playsInline
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full w-full flex-col items-center justify-center gap-2">
+                    <AvatarWidget url={peer.avatar} name={peer.name} size={52} />
+                    <p className="max-w-[90%] truncate text-xs">{peer.name}</p>
+                    <p className={`text-[10px] ${connected ? "text-emerald-300" : "text-white/50"}`}>
+                      {connected ? "Đã vào" : "Chưa tham gia"}
+                    </p>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {isVideo ? (
@@ -304,7 +339,8 @@ export function GroupCallScreen({
                 setMuted(next);
                 callService.toggleMute(next);
               }}
-              className="flex h-12 w-12 items-center justify-center rounded-full bg-white/15"
+              className="flex h-12 w-12 items-center justify-center rounded-full bg-white/15 transition hover:bg-white/25"
+              title={muted ? "Bật mic" : "Tắt mic"}
             >
               {muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
             </button>
@@ -316,15 +352,31 @@ export function GroupCallScreen({
                   setCamOff(next);
                   callService.toggleVideo(!next);
                 }}
-                className="flex h-12 w-12 items-center justify-center rounded-full bg-white/15"
+                className="flex h-12 w-12 items-center justify-center rounded-full bg-white/15 transition hover:bg-white/25"
+                title={camOff ? "Bật camera" : "Tắt camera"}
               >
                 {camOff ? <VideoOff className="h-5 w-5" /> : <Video className="h-5 w-5" />}
               </button>
             ) : null}
             <button
               type="button"
+              onClick={() => {
+                const next = !speakerOn;
+                setSpeakerOn(next);
+                callService.toggleSpeaker?.(next);
+              }}
+              className={`flex h-12 w-12 items-center justify-center rounded-full transition ${
+                speakerOn ? "bg-white/15 hover:bg-white/25" : "bg-orange-500/60 hover:bg-orange-500"
+              }`}
+              title={speakerOn ? "Tắt loa" : "Bật loa"}
+            >
+              {speakerOn ? <Volume2 className="h-5 w-5" /> : <VolumeOff className="h-5 w-5" />}
+            </button>
+            <button
+              type="button"
               onClick={handleLeave}
-              className="flex h-14 w-14 items-center justify-center rounded-full bg-red-500"
+              className="flex h-14 w-14 items-center justify-center rounded-full bg-red-500 transition hover:bg-red-600"
+              title="Kết thúc gọi"
             >
               <PhoneOff className="h-6 w-6" />
             </button>

@@ -93,6 +93,9 @@ class CallService {
   get currentCallIdValue() {
     return this.currentCallId;
   }
+  get currentUserId() {
+    return this.userId;
+  }
 
   init(user: AuthUser) {
     if (this.initialized && this.userId === user._id) return;
