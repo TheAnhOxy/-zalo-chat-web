@@ -22,6 +22,33 @@ function tempId() {
   return `temp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function buildCallMetaMessage(params: {
+  conversationId: string;
+  fallbackSenderId: string;
+  callData?: Record<string, unknown>;
+  lastMessage?: { content?: string; senderId?: string; createdAt?: string };
+}): IMessage {
+  const { conversationId, fallbackSenderId, callData, lastMessage } = params;
+  const rawCallId = String(callData?._id ?? callData?.id ?? "");
+  const createdAt = lastMessage?.createdAt || new Date().toISOString();
+  const _id = rawCallId ? `call_${rawCallId}` : `call_${createdAt}`;
+  return {
+    _id,
+    callId: rawCallId || _id,
+    conversationId,
+    senderId: lastMessage?.senderId || fallbackSenderId,
+    type: "TEXT",
+    content: lastMessage?.content || "📞 Cuộc gọi kết thúc",
+    status: "SENT",
+    isRecalled: false,
+    deletedBy: [],
+    reactions: [],
+    seenBy: [],
+    createdAt,
+    updatedAt: createdAt,
+  };
+}
+
 export function useMessages(conversationId: string | undefined, currentUserId: string | undefined) {
   const queryClient = useQueryClient();
   const socketRef = useRef<ChatSocket | null>(null);
@@ -159,6 +186,29 @@ export function useMessages(conversationId: string | undefined, currentUserId: s
         if (cid === conversationId) useChatStore.getState().setTyping(conversationId, userId, isTyping);
       },
       onPresence: (p) => useChatStore.getState().setPresence(p),
+      onConversationCallUpdated: ({ conversationId: cid, lastMessage, callData }) => {
+        if (cid !== conversationId) return;
+        const callMeta = buildCallMetaMessage({
+          conversationId,
+          fallbackSenderId: currentUserId,
+          callData,
+          lastMessage,
+        });
+        const sliceState = useChatStore.getState().messagesByConversation[conversationId];
+        const existingId = Object.values(sliceState?.byId ?? {}).find(
+          (m) => m.callId && m.callId === callMeta.callId
+        )?._id;
+        if (existingId) {
+          useChatStore.getState().updateMessage(conversationId, existingId, {
+            content: callMeta.content,
+            createdAt: callMeta.createdAt,
+            updatedAt: callMeta.updatedAt,
+            senderId: callMeta.senderId,
+          });
+        } else {
+          useChatStore.getState().upsertMessage(conversationId, callMeta);
+        }
+      },
       onReconnect: () => {
         useChatStore.getState().setUi({ socketConnected: true });
         flushOfflineQueue();

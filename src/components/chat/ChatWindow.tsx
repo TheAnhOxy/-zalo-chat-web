@@ -312,8 +312,8 @@ export function ChatWindow({
         presence={presence}
         locale={locale}
         showWallpaper={false}
-        showCalls={!isGroup}
-        callHref={!isGroup ? `/call/${conversationId}` : undefined}
+        showCalls={true}
+        callHref={`/call/${conversationId}`}
         onSearchToggle={() => setShowSearch((v) => !v)}
         onInfo={() => {
           setOptionsFocusWallpaper(false);

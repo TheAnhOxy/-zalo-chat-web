@@ -1,10 +1,12 @@
 import { io, Socket } from "socket.io-client";
 import { getStoredTokens, clearStoredTokens, clearStoredUser } from "@/src/utils/storage";
 
+type SocketEventHandler = (...args: unknown[]) => void;
+
 class SocketService {
   private socket: Socket | null = null;
   // Lưu các handler đăng ký trước khi socket ready, flush sau khi connect
-  private pendingHandlers: Array<{ event: string; handler: (...args: any[]) => void }> = [];
+  private pendingHandlers: Array<{ event: string; handler: SocketEventHandler }> = [];
 
   connect(userId: string) {
     if (this.socket?.connected) return;
@@ -66,7 +68,7 @@ class SocketService {
     this.pendingHandlers = [];
   }
 
-  emit(event: string, data: any) {
+  emit(event: string, data: unknown) {
     if (!this.socket?.connected) {
       console.warn(`[Socket] emit '${event}' — socket not connected`);
       return;
@@ -74,7 +76,7 @@ class SocketService {
     this.socket.emit(event, data);
   }
 
-  on(event: string, handler: (...args: any[]) => void) {
+  on(event: string, handler: SocketEventHandler) {
     if (this.socket) {
       this.socket.on(event, handler);
     } else {
@@ -83,7 +85,7 @@ class SocketService {
     }
   }
 
-  off(event: string, handler: (...args: any[]) => void) {
+  off(event: string, handler: SocketEventHandler) {
     this.socket?.off(event, handler);
     // Xóa khỏi pending queue nếu chưa flush
     this.pendingHandlers = this.pendingHandlers.filter(
