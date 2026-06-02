@@ -77,11 +77,30 @@ export function MessageList({
 
   const participantMap = useMemo(() => {
     const map: Record<string, { avatar?: string; name: string }> = {};
+    
+    // Build from participants prop
     if (participants) {
-      for (const p of participants) map[p.userId] = { avatar: p.avatar, name: p.fullName };
+      for (const p of participants) {
+        map[p.userId] = { 
+          avatar: p.avatar, 
+          name: p.fullName?.trim() || `User ${p.userId.slice(-4).toUpperCase()}` 
+        };
+      }
     }
+    
+    // Ensure all message senders are in map with fallback names
+    for (const msg of messages) {
+      const senderId = msg.senderId;
+      if (!map[senderId]) {
+        map[senderId] = {
+          avatar: undefined,
+          name: `User ${senderId.slice(-4).toUpperCase()}`,
+        };
+      }
+    }
+    
     return map;
-  }, [participants]);
+  }, [participants, messages]);
 
   const pinnedIdSet = useMemo(
     () => new Set((pinnedMessages ?? []).map((m) => m._id)),

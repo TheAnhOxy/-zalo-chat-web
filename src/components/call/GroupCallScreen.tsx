@@ -119,7 +119,10 @@ export function GroupCallScreen({
   }, [router, returnHref]);
 
   useEffect(() => {
-    const onState = (s: CallState) => setState(s);
+    const onState = (s: CallState) => {
+      console.log("[GroupCallScreen] Call state changed:", s);
+      setState(s);
+    };
     callService.addStateListener(onState);
     return () => callService.removeStateListener(onState);
   }, []);
@@ -195,6 +198,13 @@ export function GroupCallScreen({
       try {
         if (isIncoming) {
           if (autoAnswer && callId && offer) {
+            // Validate offer before passing it
+            if (!offer.sdp || !offer.type) {
+              console.error("[GroupCallScreen] Invalid offer:", { offerType: offer.type, sdpLength: offer.sdp?.length });
+              setError("Lỗi: Offer không hợp lệ. Vui lòng thử lại");
+              return;
+            }
+            console.log("[GroupCallScreen] Auto-answering with offer:", { callId, offerSdp: offer.sdp?.slice(0, 50) });
             await callService.answerCall({
               conversationId,
               callId,
@@ -203,18 +213,25 @@ export function GroupCallScreen({
               isVideo,
               isGroup: true,
             });
+            console.log("[GroupCallScreen] answerCall completed successfully");
           } else {
+            console.log("[GroupCallScreen] Manual accept - waiting for user to click accept button", { autoAnswer, callId, hasOffer: !!offer });
             setState("incoming");
           }
         } else {
+          console.log("[GroupCallScreen] Starting group call");
           await callService.startGroupCall({
             conversationId,
             participantIds: participants.map((p) => p.userId),
             isVideo,
           });
         }
-      } catch {
-        if (!cancelled) setError("Không thể bắt đầu cuộc gọi nhóm");
+      } catch (err) {
+        console.error("[GroupCallScreen] Error during call initialization:", err);
+        if (!cancelled) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          setError(`Lỗi khởi tạo cuộc gọi: ${errMsg}`);
+        }
       }
     })();
     return () => {
@@ -224,6 +241,7 @@ export function GroupCallScreen({
 
   useEffect(() => {
     if (state !== "ended") return;
+    console.log("[GroupCallScreen] Call ended, will navigate back in 700ms");
     const t = window.setTimeout(goBack, 700);
     return () => window.clearTimeout(t);
   }, [goBack, state]);
@@ -236,14 +254,18 @@ export function GroupCallScreen({
   };
   const handleAccept = async () => {
     if (!callId || !offer) return;
-    await callService.answerCall({
-      conversationId,
-      callId,
-      peerId: callerId,
-      offer,
-      isVideo,
-      isGroup: true,
-    });
+    try {
+      await callService.answerCall({
+        conversationId,
+        callId,
+        peerId: callerId,
+        offer,
+        isVideo,
+        isGroup: true,
+      });
+    } catch (err) {
+      setError("Lỗi khi bắt máy: " + (err instanceof Error ? err.message : "Không xác định"));
+    }
   };
 
   return (

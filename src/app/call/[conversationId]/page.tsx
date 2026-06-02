@@ -59,6 +59,21 @@ export default function CallPage() {
   }, [callerIdParam, conversation?.participants, isIncoming, userId]);
   const { profiles: groupMemberProfiles } = useGroupMemberProfiles(groupMemberIds);
 
+  const incomingParticipants = useMemo(() => {
+    // When incoming group call, use groupMemberIds with profiles
+    if (!isIncoming || !isGroupFromQuery) return undefined;
+    
+    const ids = groupMemberIds.filter((id) => id !== userId);
+    return ids.map((id) => {
+      const profile = groupMemberProfiles[id];
+      return {
+        userId: id,
+        name: profile?.fullName || `User ${id.slice(-4).toUpperCase()}`,
+        avatar: profile?.avatar,
+      };
+    });
+  }, [isIncoming, isGroupFromQuery, userId, groupMemberIds, groupMemberProfiles]);
+
   const peer = useMemo(() => {
     if (!peerUserId || !userId) return null;
 
@@ -92,7 +107,27 @@ export default function CallPage() {
 
   const offer = useMemo(() => {
     if (!isIncoming || !callId) return undefined;
-    return callService.getStoredIncomingOffer(callId);
+    
+    // Try to get from callService first
+    let storedOffer = callService.getStoredIncomingOffer(callId);
+    if (storedOffer) return storedOffer;
+    
+    // Fallback: try to get directly from sessionStorage
+    if (typeof window !== "undefined") {
+      try {
+        const raw = sessionStorage.getItem(`pending_call_offer_${callId}`);
+        if (raw) {
+          storedOffer = JSON.parse(raw) as RTCSessionDescriptionInit;
+          if (storedOffer && storedOffer.sdp) {
+            return storedOffer;
+          }
+        }
+      } catch {
+        // Ignore parse errors
+      }
+    }
+    
+    return undefined;
   }, [callId, isIncoming]);
 
   useEffect(() => {
@@ -112,7 +147,7 @@ export default function CallPage() {
     );
   }
 
-  if (!conversationId || !userId || (!peer && !isGroupConversation)) {
+  if (!conversationId || !userId || (!peer && !isGroupConversation && !isGroupFromQuery)) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-[#1a1a2e] px-6 text-center text-white">
         <p className="text-sm text-white/80">
@@ -132,6 +167,7 @@ export default function CallPage() {
         groupName={conversation?.name || "Nhóm"}
         groupAvatar={conversation?.avatar}
         participants={
+          incomingParticipants ||
           (conversation?.participants ?? [])
             .filter((p) => p.userId !== userId)
             .map((p) => {
