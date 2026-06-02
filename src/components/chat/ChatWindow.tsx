@@ -8,6 +8,7 @@ import { useMessages } from "@/src/hooks/useMessages";
 import { useTyping } from "@/src/hooks/useTyping";
 import { usePresence } from "@/src/hooks/usePresence";
 import { useAttachments } from "@/src/hooks/useAttachments";
+import { useCallHistory } from "@/src/hooks/useCallHistory";
 import { ChatHeader } from "@/src/components/chat/ChatHeader";
 import { MessageList } from "@/src/components/chat/MessageList";
 import { Composer } from "@/src/components/chat/Composer";
@@ -83,6 +84,8 @@ export function ChatWindow({
     retryFailed,
     socket,
   } = useMessages(conversationId, userId);
+
+  const { calls } = useCallHistory(conversationId, userId);
 
   const { othersTyping, onComposerInput } = useTyping(conversationId, userId, socket.current);
 
@@ -335,6 +338,7 @@ export function ChatWindow({
       >
         <MessageList
           messages={messages}
+          calls={calls}
           currentUserId={userId!}
           participants={conversation?.participants}
           pinnedMessages={conversation?.pinnedMessages}
