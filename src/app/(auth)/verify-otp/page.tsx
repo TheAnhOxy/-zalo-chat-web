@@ -17,6 +17,7 @@ import {
 import { getErrorMessage } from "@/src/utils/error";
 import { verifyOtpSchema } from "@/src/utils/validators/auth";
 import { useAuth } from "@/src/components/providers/auth-provider";
+import { KeyRound } from "lucide-react";
 
 type VerifyOtpValues = z.infer<typeof verifyOtpSchema>;
 
@@ -37,28 +38,21 @@ function VerifyOtpInner() {
   const mode = searchParams.get("mode") || "register";
   const sessionId = searchParams.get("sessionId") || "";
   const isPhoneLogin = mode === "phone-login";
+  
   const title = useMemo(() => {
-    if (mode === "forgot") {
-      return "Xác thực OTP khôi phục mật khẩu";
-    }
-
-    if (isPhoneLogin) {
-      return "Xác thực OTP đăng nhập";
-    }
-
-    return "Xác thực OTP đăng ký";
-  }, [isPhoneLogin, mode]);
+    return "Xác thực OTP";
+  }, []);
 
   const subtitle = useMemo(() => {
     if (mode === "forgot") {
-      return "Mã OTP hết hạn sau 120 giây. Bạn có thể gửi lại mã nếu cần.";
+      return "Mã OTP đã được gửi đến email của bạn để xác thực khôi phục mật khẩu.";
     }
 
     if (isPhoneLogin) {
-      return "Nhập OTP vừa được gửi đến số điện thoại liên kết để hoàn tất đăng nhập.";
+      return "Mã OTP đã được gửi đến email liên kết với số điện thoại của bạn.";
     }
 
-    return "Nhập OTP để hoàn tất tạo tài khoản.";
+    return "Mã OTP đã được gửi đến email đăng ký của bạn để hoàn tất tạo tài khoản.";
   }, [isPhoneLogin, mode]);
 
   const verifyRegisterMutation = useVerifyRegisterOtp();
@@ -122,26 +116,32 @@ function VerifyOtpInner() {
 
   return (
     <AuthShell title={title} subtitle={subtitle}>
-      <form onSubmit={onSubmit} className="space-y-4">
+      <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
         <input type="hidden" {...form.register("sessionId")} />
 
-        <div>
-          <label htmlFor="otp" className="text-sm font-medium">
-            OTP
+        {/* OTP input */}
+        <div className="auth-input-group" style={{ marginBottom: 0 }}>
+          <label htmlFor="otp" className="auth-input-label">
+            Mã OTP
           </label>
-          <input
-            id="otp"
-            {...form.register("otp")}
-            className="mt-1 h-11 w-full rounded-lg border border-white/30 bg-white/90 px-3 text-sm text-slate-900"
-            placeholder="Nhập 6 số OTP"
-          />
+          <div className="auth-input-wrapper">
+            <span className="auth-input-icon">
+              <KeyRound className="size-4" />
+            </span>
+            <input
+              id="otp"
+              {...form.register("otp")}
+              className="auth-input"
+              placeholder="Nhập 6 số OTP"
+            />
+          </div>
           <FormError message={form.formState.errors.otp?.message} />
         </div>
 
         <button
           type="submit"
           disabled={isSubmitting}
-          className="h-11 w-full rounded-lg bg-blue-600 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60"
+          className="auth-btn-primary"
         >
           {isSubmitting ? "Đang xác thực..." : "Xác thực"}
         </button>
@@ -150,7 +150,7 @@ function VerifyOtpInner() {
           type="button"
           onClick={handleResend}
           disabled={resendMutation.isPending || countdown > 0}
-          className="h-11 w-full rounded-lg border border-white/40 bg-white/10 text-sm font-semibold transition hover:bg-white/20 disabled:opacity-60"
+          className="auth-btn-secondary"
         >
           {resendMutation.isPending
             ? "Đang gửi lại..."
@@ -167,10 +167,10 @@ export default function VerifyOtpPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
+        <div className="flex min-h-screen items-center justify-center bg-slate-50 text-emerald-600">
           <div className="text-center space-y-4">
-            <div className="h-10 w-10 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto" />
-            <p className="text-sm text-white/60">Đang tải...</p>
+            <div className="h-10 w-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto" />
+            <p className="text-sm text-slate-500">Đang tải...</p>
           </div>
         </div>
       }

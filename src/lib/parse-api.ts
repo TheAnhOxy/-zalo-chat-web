@@ -3,7 +3,8 @@ import { IMessage, IReaction, ISeenBy, MessageType } from "@/src/types/message";
 import { IUserPresence } from "@/src/types/presence";
 import { normalizeMessage } from "@/src/lib/messages";
 
-function extractId(raw: unknown): string {
+/** Chuẩn hóa MongoDB ObjectId (string hoặc `{ $oid }`) — dùng khi so sánh requesterId/addresseeId. */
+export function extractMongoId(raw: unknown): string {
   if (raw == null) return "";
   if (typeof raw === "string") return raw;
   if (typeof raw === "object") {
@@ -33,7 +34,7 @@ export function parseMessageFromApi(raw: Record<string, unknown>): IMessage {
   const replyRaw = raw.replyToId ?? raw.replyTo;
 
   return normalizeMessage({
-    _id: extractId(raw._id ?? raw.id),
+    _id: extractMongoId(raw._id ?? raw.id),
     conversationId: String(raw.conversationId ?? ""),
     senderId: String(raw.senderId ?? ""),
     clientTempId: raw.clientTempId ?? raw.clientTempID ?? raw.client_temp_id ? String(raw.clientTempId ?? raw.clientTempID ?? raw.client_temp_id) : undefined,
@@ -57,7 +58,7 @@ export function parseConversationFromApi(raw: Record<string, unknown>): IConvers
   const members = ((raw.members as unknown[]) ?? []).map((m) => {
     if (typeof m === "string") {
       return {
-        userId: extractId(m),
+        userId: extractMongoId(m),
         fullName: "",
         avatar: undefined,
         isOnline: false,
@@ -70,7 +71,7 @@ export function parseConversationFromApi(raw: Record<string, unknown>): IConvers
     const user = (item.user as Record<string, unknown>) ?? item;
     
     return {
-      userId: extractId(user.userId ?? user._id ?? item.userId ?? item._id),
+      userId: extractMongoId(user.userId ?? user._id ?? item.userId ?? item._id),
       fullName: String(
         user.name ?? user.fullName ?? user.nickname ?? item.name ?? item.fullName ?? item.nickname ?? ""
       ).trim(),
@@ -88,7 +89,7 @@ export function parseConversationFromApi(raw: Record<string, unknown>): IConvers
 
   let pinnedMessages: IMessage[] = [];
   let pinnedMessageIds: string[] = [];
-  const rawId = extractId(raw._id ?? raw.id);
+  const rawId = extractMongoId(raw._id ?? raw.id);
 
   try {
     if (Array.isArray(raw.pinnedMessages)) {
@@ -135,7 +136,7 @@ export function parseConversationFromApi(raw: Record<string, unknown>): IConvers
     participants: members,
     lastMessage: lastMessageRaw
       ? {
-          _id: extractId(lastMessageRaw._id ?? lastMessageRaw.id ?? lastMessageRaw.messageId),
+          _id: extractMongoId(lastMessageRaw._id ?? lastMessageRaw.id ?? lastMessageRaw.messageId),
           content: String(lastMessageRaw.content ?? ""),
           type: (lastMessageRaw.messageType ?? lastMessageRaw.type ?? "TEXT") as IMessage["type"],
           senderId: String(lastMessageRaw.senderId ?? ""),

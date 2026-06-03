@@ -1,5 +1,5 @@
 import { apiClient } from "@/src/services/api/client";
-import { parseConversationFromApi } from "@/src/lib/parse-api";
+import { extractMongoId, parseConversationFromApi } from "@/src/lib/parse-api";
 import { IConversation } from "@/src/types/conversation";
 import { IUser } from "@/src/types/user";
 
@@ -20,11 +20,13 @@ export const contactsService = {
     try {
       const res = await apiClient.get<any[]>(`/friendships/user/${userId}`);
       const accepted = res.data.filter((f) => f.status === "ACCEPTED");
-      
+
       const friends = await Promise.all(
         accepted.map(async (f) => {
           try {
-            const friendId = f.requesterId === userId ? f.addresseeId : f.requesterId;
+            const rid = extractMongoId(f.requesterId);
+            const aid = extractMongoId(f.addresseeId);
+            const friendId = rid === userId ? aid : rid;
             const userRes = await apiClient.get<IUser>(`/users/${friendId}`);
             return userRes.data;
           } catch (e) {
@@ -70,15 +72,16 @@ export const contactsService = {
   async getReceivedRequests(userId: string) {
     // According to flutter app, we get friendships and filter by PENDING and addresseeId == userId
     const res = await apiClient.get<any[]>(`/friendships/user/${userId}`);
-    const pending = res.data.filter((f) => f.status === "PENDING" && f.addresseeId === userId);
-    
-    // Fetch users for each request
+    const pending = res.data.filter(
+      (f) => f.status === "PENDING" && extractMongoId(f.addresseeId) === userId
+    );
+
     const requests = await Promise.all(
       pending.map(async (f) => {
         try {
-          const userRes = await apiClient.get<IUser>(`/users/${f.requesterId}`);
+          const userRes = await apiClient.get<IUser>(`/users/${extractMongoId(f.requesterId)}`);
           return {
-            id: f._id || f.id,
+            id: extractMongoId(f._id ?? f.id),
             user: userRes.data,
             createdAt: f.createdAt,
           };
@@ -92,14 +95,16 @@ export const contactsService = {
 
   async getSentRequests(userId: string) {
     const res = await apiClient.get<any[]>(`/friendships/user/${userId}`);
-    const pending = res.data.filter((f) => f.status === "PENDING" && f.requesterId === userId);
-    
+    const pending = res.data.filter(
+      (f) => f.status === "PENDING" && extractMongoId(f.requesterId) === userId
+    );
+
     const requests = await Promise.all(
       pending.map(async (f) => {
         try {
-          const userRes = await apiClient.get<IUser>(`/users/${f.addresseeId}`);
+          const userRes = await apiClient.get<IUser>(`/users/${extractMongoId(f.addresseeId)}`);
           return {
-            id: f._id || f.id,
+            id: extractMongoId(f._id ?? f.id),
             user: userRes.data,
             createdAt: f.createdAt,
           };
@@ -127,35 +132,37 @@ export const contactsService = {
   async getPendingRequestCount(userId: string): Promise<number> {
     try {
       const res = await apiClient.get<any[]>(`/friendships/user/${userId}`);
-      return res.data.filter((f) => f.status === "PENDING" && f.addresseeId === userId).length;
+      return res.data.filter(
+        (f) => f.status === "PENDING" && extractMongoId(f.addresseeId) === userId
+      ).length;
     } catch {
       return 0;
     }
   },
 
-  sendFriendRequest(requesterId: string, receiverId: string, message?: string) {
-    return apiClient.post(`/friendships`, { requesterId, addresseeId: receiverId, message });
+  sendFriendRequest(requesterId: string, receiverId: string, _message?: string) {
+    return apiClient.post(`/friendships`, { requesterId, addresseeId: receiverId });
   },
 
   /** Quan hệ giữa hai user (giống mobile getFriendshipBetween). */
   async getFriendshipBetween(
     myUserId: string,
     otherUserId: string
-  ): Promise<{ id: string; status: string } | null> {
+  ): Promise<{ id: string; status: string; requesterId: string; addresseeId: string } | null> {
     if (!myUserId || !otherUserId) return null;
     try {
-      const res = await apiClient.get<{ _id?: string; id?: string; requesterId: string; addresseeId: string; status: string }[]>(
+      const res = await apiClient.get<{ _id?: string; id?: string; requesterId: unknown; addresseeId: unknown; status: string }[]>(
         `/friendships/user/${myUserId}`
       );
       for (const f of res.data) {
-        const rid = String(f.requesterId);
-        const aid = String(f.addresseeId);
+        const rid = extractMongoId(f.requesterId);
+        const aid = extractMongoId(f.addresseeId);
         const match =
           (rid === myUserId && aid === otherUserId) || (rid === otherUserId && aid === myUserId);
         if (!match) continue;
-        const id = String(f._id ?? f.id ?? "");
+        const id = extractMongoId(f._id ?? f.id);
         if (!id) continue;
-        return { id, status: f.status };
+        return { id, status: f.status, requesterId: rid, addresseeId: aid };
       }
       return null;
     } catch {
