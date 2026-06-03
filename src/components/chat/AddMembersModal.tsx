@@ -32,8 +32,8 @@ export function AddMembersModal({
     return friends.filter((f) => {
       if (existing.has(f._id)) return false;
       if (!q) return true;
-      const name = (f.fullName || f.username || "").toLowerCase();
-      return name.includes(q) || (f.phone || "").includes(q);
+      const name = (f.fullName || f.email || "").toLowerCase();
+      return name.includes(q) || (f.phone || "").includes(q) || (f.email || "").toLowerCase().includes(q);
     });
   }, [friends, existing, query]);
 
@@ -76,7 +76,7 @@ export function AddMembersModal({
             <p className="p-6 text-center text-sm text-[var(--qc-text-secondary)]">Không có bạn bè để thêm</p>
           ) : (
             candidates.map((f) => {
-              const name = f.fullName || f.username || "Người dùng";
+              const name = f.fullName || f.email || "Người dùng";
               const checked = selected.has(f._id);
               return (
                 <button

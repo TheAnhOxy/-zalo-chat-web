@@ -28,7 +28,7 @@ export async function emitAddMemberSystemMessages(
     const users = await Promise.all(newUserIds.map((id) => userService.getProfile(id)));
     for (let i = 0; i < newUserIds.length; i++) {
       const peerName =
-        users[i]?.fullName?.trim() || users[i]?.username?.trim() || "một thành viên";
+        users[i]?.fullName?.trim() || users[i]?.email?.trim() || "một thành viên";
       emitSystemMessage(conversationId, senderId, `ADD_MEMBER|${actor}|${peerName}`);
     }
   } catch {

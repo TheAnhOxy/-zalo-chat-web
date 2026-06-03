@@ -19,6 +19,7 @@ export function GroupDescriptionDialog({
   saving = false,
   onClose,
   onSave,
+  onReadOnlyInteract,
 }: GroupDescriptionDialogProps) {
   const [text, setText] = useState(initialDescription);
 
