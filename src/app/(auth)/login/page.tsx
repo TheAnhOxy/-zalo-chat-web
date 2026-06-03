@@ -161,7 +161,8 @@ function LoginInner() {
 
     clearPendingLogin();
     showToast("Đăng nhập nhanh thành công", "success");
-    router.replace("/");
+    const redirect = searchParams.get("redirect");
+    router.replace(redirect?.startsWith("/") ? redirect : "/");
   };
 
   const handlePhoneOtpRequest = async () => {

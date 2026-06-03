@@ -111,6 +111,15 @@ export const conversationGroupApi = {
       .then((res) => unwrap<InviteLinkResult>(res.data));
   },
 
+  joinByInviteCode(code: string, userId: string) {
+    return apiClient
+      .post<unknown>("/conversations/join-by-link", { code, userId })
+      .then((res) => {
+        const payload = unwrap<Record<string, unknown>>(res.data);
+        return parseConversationFromApi(payload);
+      });
+  },
+
   updateGroupChatBackground(
     conversationId: string,
     payload: {
