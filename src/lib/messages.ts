@@ -3,8 +3,25 @@ import { IMessage } from "@/src/types/message";
 export type MessageGroupItem =
   | { kind: "date"; key: string; label: string }
   | { kind: "system"; key: string; message: IMessage }
-  | { kind: "message"; key: string; message: IMessage; showAvatar: boolean; isMine: boolean }
-  | { kind: "mediaGroup"; key: string; messages: IMessage[]; showAvatar: boolean; isMine: boolean };
+  | { kind: "message"; key: string; message: IMessage; showAvatar: boolean; isMine: boolean };
+
+export function estimateMessageListRowHeight(item: MessageGroupItem): number {
+  switch (item.kind) {
+    case "date":
+      return 44;
+    case "system":
+      return 40;
+    case "message": {
+      const t = item.message.type;
+      if (t === "IMAGE" || t === "VIDEO" || t === "MEDIA_CLUSTER") return 320;
+      if (t === "VOICE" || t === "FILE") return 88;
+      const len = item.message.content?.length ?? 0;
+      return Math.min(200, 72 + Math.floor(len / 40) * 18);
+    }
+    default:
+      return 72;
+  }
+}
 
 export function parseMessageDate(value: Date | string): Date {
   return value instanceof Date ? value : new Date(value);
@@ -44,7 +61,7 @@ export function groupMessagesForList(
 
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
-    if (message.deletedBy?.includes(currentUserId) || message.isRecalled) {
+    if (message.deletedBy?.includes(currentUserId)) {
       continue;
     }
 
@@ -75,41 +92,13 @@ export function groupMessagesForList(
     const sameGroup = message.senderId === lastSenderId && timeSinceLast <= GROUP_THRESHOLD_MS;
     const showAvatar = !isMine && !sameGroup;
 
-    if (message.type === "IMAGE" || message.type === "VIDEO") {
-      let addedToExisting = false;
-      const lastItem = items[items.length - 1];
-
-      if (lastItem && lastItem.kind === "mediaGroup" && lastItem.messages[0].senderId === message.senderId) {
-        const lastMsg = lastItem.messages[lastItem.messages.length - 1];
-        const timeDiff = Math.abs(date.getTime() - parseMessageDate(lastMsg.createdAt).getTime()) / 60000;
-        
-        if (
-          (message.metadata?.groupId && lastMsg.metadata?.groupId === message.metadata.groupId) ||
-          (!message.metadata?.groupId && !lastMsg.metadata?.groupId && timeDiff <= 5)
-        ) {
-          lastItem.messages.push(message);
-          addedToExisting = true;
-        }
-      }
-
-      if (!addedToExisting) {
-        items.push({
-          kind: "mediaGroup",
-          key: `mediaGroup-${message.clientTempId || message._id}`,
-          messages: [message],
-          showAvatar,
-          isMine,
-        });
-      }
-    } else {
-      items.push({
-        kind: "message",
-        key: message.clientTempId || message._id,
-        message,
-        showAvatar,
-        isMine,
-      });
-    }
+    items.push({
+      kind: "message",
+      key: message.clientTempId || message._id,
+      message,
+      showAvatar,
+      isMine,
+    });
 
     lastSenderId = message.senderId;
     lastMessageTime = date.getTime();
@@ -186,7 +175,7 @@ function isVideoUrl(content: string): boolean {
   return (t.startsWith("http://") || t.startsWith("https://")) && VIDEO_URL_RE.test(t);
 }
 
-const ATTACHMENT_TYPES = new Set<IMessage["type"]>(["IMAGE", "VIDEO", "VOICE", "FILE"]);
+const ATTACHMENT_TYPES = new Set<IMessage["type"]>(["IMAGE", "VIDEO", "MEDIA_CLUSTER", "VOICE", "FILE"]);
 
 /**
  * Preview text for conversation list — mirrors mobile chat_list_screen._buildMessagePreview

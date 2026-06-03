@@ -13,6 +13,7 @@ export function buildForwardMetadata(message: IMessage): Record<string, unknown>
   if (md.lat != null) metadata.lat = md.lat;
   if (md.lng != null) metadata.lng = md.lng;
   if (md.duration != null) metadata.duration = md.duration;
+  if (md.mediaItems?.length) metadata.mediaItems = md.mediaItems;
 
   return Object.keys(metadata).length > 0 ? metadata : undefined;
 }
@@ -25,6 +26,8 @@ export function forwardPreviewLabel(message: IMessage): string {
       return text ? `[Ảnh] ${text.slice(0, 60)}` : "[Hình ảnh]";
     case "VIDEO":
       return "[Video]";
+    case "MEDIA_CLUSTER":
+      return "[Album ảnh/video]";
     case "FILE":
       return message.metadata?.fileName?.trim() || "[Tệp đính kèm]";
     case "VOICE":
