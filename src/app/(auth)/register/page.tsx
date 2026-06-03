@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -10,6 +12,7 @@ import { useToast } from "@/src/components/providers/toast-provider";
 import { useRegister } from "@/src/hooks/use-auth-actions";
 import { getErrorMessage } from "@/src/utils/error";
 import { registerSchema } from "@/src/utils/validators/auth";
+import { User, Phone, Mail, Lock, Eye, EyeOff, ArrowLeft } from "lucide-react";
 
 type RegisterValues = z.infer<typeof registerSchema>;
 
@@ -17,6 +20,9 @@ export default function RegisterPage() {
   const router = useRouter();
   const { showToast } = useToast();
   const registerMutation = useRegister();
+
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const form = useForm<RegisterValues>({
     resolver: zodResolver(registerSchema),
@@ -45,82 +51,133 @@ export default function RegisterPage() {
   });
 
   return (
-    <AuthShell title="Đăng ký" subtitle="Sử dụng API /auth/register để tạo phiên OTP">
-      <form onSubmit={onSubmit} className="space-y-4">
-        <div>
-          <label htmlFor="fullName" className="text-sm font-medium">
+    <AuthShell title="Đăng ký" subtitle="Tạo tài khoản QuickChat mới">
+      <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+        {/* Họ và tên */}
+        <div className="auth-input-group" style={{ marginBottom: 0 }}>
+          <label htmlFor="fullName" className="auth-input-label">
             Họ và tên
           </label>
-          <input
-            id="fullName"
-            {...form.register("fullName")}
-            className="mt-1 h-11 w-full rounded-lg border border-white/30 bg-white/90 px-3 text-sm text-slate-900"
-            placeholder="Ví dụ: Nguyễn Văn A"
-          />
+          <div className="auth-input-wrapper">
+            <span className="auth-input-icon">
+              <User className="size-4" />
+            </span>
+            <input
+              id="fullName"
+              {...form.register("fullName")}
+              className="auth-input"
+              placeholder="Nguyễn Văn A"
+            />
+          </div>
           <FormError message={form.formState.errors.fullName?.message} />
         </div>
 
-        <div>
-          <label htmlFor="phone" className="text-sm font-medium">
+        {/* Số điện thoại */}
+        <div className="auth-input-group" style={{ marginBottom: 0 }}>
+          <label htmlFor="phone" className="auth-input-label">
             Số điện thoại
           </label>
-          <input
-            id="phone"
-            {...form.register("phone")}
-            className="mt-1 h-11 w-full rounded-lg border border-white/30 bg-white/90 px-3 text-sm text-slate-900"
-            placeholder="Ví dụ: 0912345678 hoặc 84912345678"
-          />
+          <div className="auth-input-wrapper">
+            <span className="auth-input-icon">
+              <Phone className="size-4" />
+            </span>
+            <input
+              id="phone"
+              {...form.register("phone")}
+              className="auth-input"
+              placeholder="0901234567"
+            />
+          </div>
           <FormError message={form.formState.errors.phone?.message} />
         </div>
 
-        <div>
-          <label htmlFor="email" className="text-sm font-medium">
+        {/* Email */}
+        <div className="auth-input-group" style={{ marginBottom: 0 }}>
+          <label htmlFor="email" className="auth-input-label">
             Email
           </label>
-          <input
-            id="email"
-            {...form.register("email")}
-            className="mt-1 h-11 w-full rounded-lg border border-white/30 bg-white/90 px-3 text-sm text-slate-900"
-            placeholder="name@company.com"
-          />
+          <div className="auth-input-wrapper">
+            <span className="auth-input-icon">
+              <Mail className="size-4" />
+            </span>
+            <input
+              id="email"
+              {...form.register("email")}
+              className="auth-input"
+              placeholder="you@gmail.com"
+            />
+          </div>
           <FormError message={form.formState.errors.email?.message} />
         </div>
 
-        <div>
-          <label htmlFor="password" className="text-sm font-medium">
+        {/* Mật khẩu */}
+        <div className="auth-input-group" style={{ marginBottom: 0 }}>
+          <label htmlFor="password" className="auth-input-label">
             Mật khẩu
           </label>
-          <input
-            id="password"
-            type="password"
-            {...form.register("password")}
-            className="mt-1 h-11 w-full rounded-lg border border-white/30 bg-white/90 px-3 text-sm text-slate-900"
-            placeholder="Tối thiểu 8 ký tự, gồm hoa/thường/số"
-          />
+          <div className="auth-input-wrapper">
+            <span className="auth-input-icon">
+              <Lock className="size-4" />
+            </span>
+            <input
+              id="password"
+              type={showPassword ? "text" : "password"}
+              {...form.register("password")}
+              className="auth-input auth-input-password"
+              placeholder="Nhập mật khẩu"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword((prev) => !prev)}
+              className="auth-eye-btn"
+            >
+              {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </button>
+          </div>
           <FormError message={form.formState.errors.password?.message} />
         </div>
 
-        <div>
-          <label htmlFor="confirmPassword" className="text-sm font-medium">
+        {/* Xác nhận mật khẩu */}
+        <div className="auth-input-group" style={{ marginBottom: 0 }}>
+          <label htmlFor="confirmPassword" className="auth-input-label">
             Xác nhận mật khẩu
           </label>
-          <input
-            id="confirmPassword"
-            type="password"
-            {...form.register("confirmPassword")}
-            className="mt-1 h-11 w-full rounded-lg border border-white/30 bg-white/90 px-3 text-sm text-slate-900"
-            placeholder="Nhập lại mật khẩu"
-          />
+          <div className="auth-input-wrapper">
+            <span className="auth-input-icon">
+              <Lock className="size-4" />
+            </span>
+            <input
+              id="confirmPassword"
+              type={showConfirmPassword ? "text" : "password"}
+              {...form.register("confirmPassword")}
+              className="auth-input auth-input-password"
+              placeholder="Nhập lại mật khẩu"
+            />
+            <button
+              type="button"
+              onClick={() => setShowConfirmPassword((prev) => !prev)}
+              className="auth-eye-btn"
+            >
+              {showConfirmPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+            </button>
+          </div>
           <FormError message={form.formState.errors.confirmPassword?.message} />
         </div>
 
-        <button
-          type="submit"
-          disabled={registerMutation.isPending}
-          className="h-11 w-full rounded-lg bg-blue-600 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:opacity-60"
-        >
-          {registerMutation.isPending ? "Đang gửi..." : "Đăng ký"}
-        </button>
+        {/* Buttons */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.625rem", paddingTop: "0.5rem" }}>
+          <button
+            type="submit"
+            disabled={registerMutation.isPending}
+            className="auth-btn-primary"
+          >
+            {registerMutation.isPending ? "Đang đăng ký..." : "Đăng ký"}
+          </button>
+          <Link href="/login" className="auth-btn-secondary" style={{ textDecoration: "none" }}>
+            <ArrowLeft className="size-4" />
+            Trở lại đăng nhập
+          </Link>
+        </div>
       </form>
     </AuthShell>
   );

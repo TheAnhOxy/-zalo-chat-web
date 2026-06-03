@@ -140,39 +140,63 @@ function LoginChallengeInner() {
   };
 
   return (
-    <AuthShell title="Xác minh Đăng nhập" subtitle="Email Login Challenge">
+    <AuthShell title="Xác minh Đăng nhập" subtitle="Xác nhận yêu cầu bảo mật">
       <div className="flex flex-col items-center space-y-6 text-center">
         {/* Animated Status Icon */}
-        <div className="relative flex h-24 w-24 items-center justify-center rounded-full bg-white/5 border border-white/10 shadow-inner">
+        <div style={{
+          position: "relative",
+          display: "flex",
+          width: "96px",
+          height: "96px",
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: "50%",
+          backgroundColor: "#f5f5f5",
+          border: "1px solid #e8f5e9",
+          boxShadow: "inset 0 2px 4px rgba(0,0,0,0.05)",
+        }}>
           {status === "pending" && (
             <>
-              <div className="absolute inset-0 rounded-full bg-cyan-400/20 animate-ping opacity-75" />
-              <Mail className="size-10 text-cyan-300 animate-pulse" />
+              <div style={{
+                position: "absolute",
+                inset: 0,
+                borderRadius: "50%",
+                backgroundColor: "rgba(76, 175, 80, 0.1)",
+                animation: "ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite",
+              }} />
+              <Mail className="size-10" style={{ color: "#43a047", animation: "pulse 2s ease-in-out infinite" }} />
             </>
           )}
           {status === "consumed" && (
-            <CheckCircle2 className="size-12 text-emerald-400 animate-bounce" />
+            <CheckCircle2 className="size-12" style={{ color: "#43a047" }} />
           )}
           {status === "rejected" && (
-            <XCircle className="size-12 text-rose-400" />
+            <XCircle className="size-12" style={{ color: "#e53935" }} />
           )}
           {status === "expired" && (
-            <ShieldAlert className="size-12 text-amber-400" />
+            <ShieldAlert className="size-12" style={{ color: "#f9a825" }} />
           )}
         </div>
 
         {/* Reason Card */}
-        <div className="w-full rounded-xl bg-white/5 border border-white/10 p-4 text-left">
-          <p className="text-sm font-medium text-white/90 flex items-start gap-2">
-            <ShieldAlert className="size-4 text-cyan-300 mt-0.5 shrink-0" />
+        <div style={{
+          width: "100%",
+          borderRadius: "12px",
+          backgroundColor: "#fafafa",
+          border: "1px solid #e8f5e9",
+          padding: "1rem",
+          textAlign: "left",
+        }}>
+          <p style={{ fontSize: "0.875rem", fontWeight: 500, color: "#37474f", display: "flex", alignItems: "flex-start", gap: "0.5rem" }}>
+            <ShieldAlert className="size-4 shrink-0" style={{ color: "#43a047", marginTop: "2px" }} />
             <span>{reasonText}</span>
           </p>
-          <div className="mt-3 text-xs text-white/70 space-y-1">
+          <div style={{ marginTop: "0.75rem", fontSize: "0.75rem", color: "#78909c" }}>
             <p>
-              <strong className="text-white/90">Email:</strong> {email}
+              <strong style={{ color: "#37474f" }}>Email:</strong> {email}
             </p>
             {secondsLeft > 0 && status === "pending" && (
-              <p className="flex items-center gap-1.5 text-cyan-200 mt-1 font-medium">
+              <p style={{ display: "flex", alignItems: "center", gap: "0.375rem", color: "#43a047", marginTop: "0.375rem", fontWeight: 600 }}>
                 <Clock className="size-3.5" />
                 Còn lại {secondsLeft} giây để xác nhận
               </p>
@@ -181,15 +205,15 @@ function LoginChallengeInner() {
         </div>
 
         {/* Live Status Text */}
-        <div className="py-2">
-          <p className="text-base font-semibold tracking-wide text-white/90 transition-all duration-300">
+        <div style={{ padding: "0.5rem 0" }}>
+          <p style={{ fontSize: "1rem", fontWeight: 600, color: "#37474f" }}>
             {statusText}
           </p>
           {status === "pending" && (
-            <div className="mt-3 flex justify-center gap-1">
-              <span className="h-2 w-2 rounded-full bg-cyan-400 animate-bounce [animation-delay:-0.3s]"></span>
-              <span className="h-2 w-2 rounded-full bg-cyan-400 animate-bounce [animation-delay:-0.15s]"></span>
-              <span className="h-2 w-2 rounded-full bg-cyan-400 animate-bounce"></span>
+            <div style={{ marginTop: "0.75rem", display: "flex", justifyContent: "center", gap: "0.375rem" }}>
+              <span style={{ height: "8px", width: "8px", borderRadius: "50%", backgroundColor: "#43a047", display: "inline-block", animation: "bounce 1s infinite", animationDelay: "-0.3s" }} />
+              <span style={{ height: "8px", width: "8px", borderRadius: "50%", backgroundColor: "#43a047", display: "inline-block", animation: "bounce 1s infinite", animationDelay: "-0.15s" }} />
+              <span style={{ height: "8px", width: "8px", borderRadius: "50%", backgroundColor: "#43a047", display: "inline-block", animation: "bounce 1s infinite" }} />
             </div>
           )}
         </div>
@@ -198,9 +222,10 @@ function LoginChallengeInner() {
         <button
           type="button"
           onClick={handleCancel}
-          className="group mt-4 flex items-center justify-center gap-2 w-full h-11 rounded-lg border border-white/20 bg-white/5 text-sm font-semibold text-white/80 transition-all hover:bg-white/10 hover:text-white"
+          className="auth-btn-secondary"
+          style={{ marginTop: "0.5rem" }}
         >
-          <ArrowLeft className="size-4 group-hover:-translate-x-0.5 transition-transform" />
+          <ArrowLeft className="size-4" />
           Hủy và quay lại đăng nhập
         </button>
       </div>
@@ -212,10 +237,10 @@ export default function LoginChallengePage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
+        <div className="flex min-h-screen items-center justify-center bg-slate-50 text-emerald-600">
           <div className="text-center space-y-4">
-            <div className="h-10 w-10 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto" />
-            <p className="text-sm text-white/60">Đang tải...</p>
+            <div className="h-10 w-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto" />
+            <p className="text-sm text-slate-500">Đang tải...</p>
           </div>
         </div>
       }

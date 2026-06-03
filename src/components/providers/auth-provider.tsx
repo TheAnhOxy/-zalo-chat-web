@@ -13,6 +13,7 @@ import {
   getStoredUser,
   setStoredTokens,
   setStoredUser,
+  clearPendingLogin,
 } from "@/src/utils/storage";
 
 interface AuthContextValue {
@@ -83,6 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       clearStoredTokens();
       clearStoredUser();
+      clearPendingLogin();
       setUser(null);
       router.replace("/login");
     }
