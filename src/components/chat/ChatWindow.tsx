@@ -110,10 +110,14 @@ export function ChatWindow({
   );
 
   const isGroup = conversation?.type === "GROUP";
-  const memberIds = useMemo(
-    () => conversation?.participants.map((p) => p.userId) ?? [],
-    [conversation?.participants]
-  );
+  const memberIds = useMemo(() => {
+    const ids = new Set(conversation?.participants.map((p) => p.userId) ?? []);
+    if (isGroup) {
+      messages.forEach(m => ids.add(m.senderId));
+    }
+    return Array.from(ids);
+  }, [conversation?.participants, isGroup, messages]);
+
   const { profiles: memberProfiles } = useGroupMemberProfiles(isGroup ? memberIds : []);
   const otherId = other?.userId;
   const { data: peerUser } = usePeerProfile(otherId, Boolean(conversation && !isGroup));
@@ -121,8 +125,46 @@ export function ChatWindow({
 
   const participantsForList = useMemo(() => {
     if (!conversation?.participants) return undefined;
-    if (!isGroup) return conversation.participants;
-    return conversation.participants.map((p) => ({
+    
+    const baseList = [...conversation.participants];
+    const presentIds = new Set(baseList.map(p => p.userId));
+
+    if (!isGroup) {
+      return baseList.map((p) => {
+        const isPeer = p.userId === otherId;
+        const isMe = p.userId === userId;
+        const profileName = isPeer
+          ? peerProfiles?.[p.userId]?.fullName
+          : isMe
+            ? user?.fullName
+            : undefined;
+        const profileAvatar = isPeer
+          ? peerProfiles?.[p.userId]?.avatar
+          : isMe
+            ? user?.avatar
+            : undefined;
+
+        return {
+          ...p,
+          fullName:
+            profileName?.trim() ||
+            p.fullName?.trim() ||
+            `User ${p.userId.slice(-4).toUpperCase()}`,
+          avatar: profileAvatar || p.avatar,
+        };
+      });
+    }
+
+    memberIds.forEach(id => {
+      if (!presentIds.has(id)) {
+        baseList.push({
+          userId: id,
+          fullName: `User ${id.slice(-4).toUpperCase()}`,
+        } as any);
+      }
+    });
+
+    return baseList.map((p) => ({
       ...p,
       fullName:
         memberProfiles[p.userId]?.fullName?.trim() ||
@@ -130,7 +172,7 @@ export function ChatWindow({
         `User ${p.userId.slice(-4).toUpperCase()}`,
       avatar: memberProfiles[p.userId]?.avatar || p.avatar,
     }));
-  }, [conversation?.participants, isGroup, memberProfiles]);
+  }, [conversation?.participants, isGroup, memberProfiles, otherId, peerProfiles, user?.fullName, user?.avatar, userId, memberIds]);
 
   const title =
     conversation && userId
