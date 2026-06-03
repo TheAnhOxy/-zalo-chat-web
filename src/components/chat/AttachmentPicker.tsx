@@ -3,24 +3,17 @@
 import { useRef } from "react";
 import { Image, Paperclip, Mic } from "lucide-react";
 import { t, ChatLocale } from "@/src/lib/i18n/chat";
-import { AttachmentUploadState } from "@/src/hooks/useAttachments";
-
 interface AttachmentPickerProps {
   locale?: ChatLocale;
   disabled?: boolean;
-  uploads: AttachmentUploadState[];
   onFilesSelected: (files: FileList) => void;
-  onCancelUpload: (id: string) => void;
-  onRetryUpload?: (id: string) => void;
   onVoiceRecordClick?: () => void;
 }
 
 export function AttachmentPicker({
   locale = "vi",
   disabled,
-  uploads,
   onFilesSelected,
-  onCancelUpload,
   onVoiceRecordClick,
 }: AttachmentPickerProps) {
   const imageRef = useRef<HTMLInputElement>(null);
@@ -73,27 +66,6 @@ export function AttachmentPicker({
         </button>
       </div>
 
-      {uploads.length > 0 && (
-        <ul className="space-y-1 px-2" aria-label="Tiến trình tải lên">
-          {uploads.map((u) => (
-            <li key={u.id} className="flex items-center gap-2 text-xs text-gray-600">
-              <span className="truncate flex-1">{u.file.name}</span>
-              {u.status === "uploading" && (
-                <progress value={u.progress} max={100} className="w-20" />
-              )}
-              {u.status === "failed" && <span className="text-red-500">{t("retry", locale)}</span>}
-              <button
-                type="button"
-                className="text-gray-500 hover:text-red-500"
-                onClick={() => onCancelUpload(u.id)}
-                aria-label={t("cancelUpload", locale)}
-              >
-                ×
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }

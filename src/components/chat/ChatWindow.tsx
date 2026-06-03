@@ -35,6 +35,7 @@ import { profileCacheForUser, usePeerProfile } from "@/src/hooks/usePeerProfile"
 import { useGroupMemberProfiles } from "@/src/hooks/useGroupMemberProfiles";
 import { ComposerActionsSheet } from "@/src/components/chat/ComposerActionsSheet";
 import { AiChatSheet } from "@/src/components/ai/AiChatSheet";
+import { isMediaFile, shouldSendAsMediaCluster } from "@/src/lib/media-cluster";
 
 interface ChatWindowProps {
   conversationId: string;
@@ -83,6 +84,7 @@ export function ChatWindow({
     loadInitial,
     sendText,
     sendWithAttachment,
+    sendMediaCluster,
     editMessage,
     recallMessage,
     deleteMessageForMe,
@@ -110,10 +112,14 @@ export function ChatWindow({
   );
 
   const isGroup = conversation?.type === "GROUP";
-  const memberIds = useMemo(
-    () => conversation?.participants.map((p) => p.userId) ?? [],
-    [conversation?.participants]
-  );
+  const memberIds = useMemo(() => {
+    const ids = new Set(conversation?.participants.map((p) => p.userId) ?? []);
+    if (isGroup) {
+      messages.forEach(m => ids.add(m.senderId));
+    }
+    return Array.from(ids);
+  }, [conversation?.participants, isGroup, messages]);
+
   const { profiles: memberProfiles } = useGroupMemberProfiles(isGroup ? memberIds : []);
   const otherId = other?.userId;
   const { data: peerUser } = usePeerProfile(otherId, Boolean(conversation && !isGroup));
@@ -121,8 +127,46 @@ export function ChatWindow({
 
   const participantsForList = useMemo(() => {
     if (!conversation?.participants) return undefined;
-    if (!isGroup) return conversation.participants;
-    return conversation.participants.map((p) => ({
+    
+    const baseList = [...conversation.participants];
+    const presentIds = new Set(baseList.map(p => p.userId));
+
+    if (!isGroup) {
+      return baseList.map((p) => {
+        const isPeer = p.userId === otherId;
+        const isMe = p.userId === userId;
+        const profileName = isPeer
+          ? peerProfiles?.[p.userId]?.fullName
+          : isMe
+            ? user?.fullName
+            : undefined;
+        const profileAvatar = isPeer
+          ? peerProfiles?.[p.userId]?.avatar
+          : isMe
+            ? user?.avatar
+            : undefined;
+
+        return {
+          ...p,
+          fullName:
+            profileName?.trim() ||
+            p.fullName?.trim() ||
+            `User ${p.userId.slice(-4).toUpperCase()}`,
+          avatar: profileAvatar || p.avatar,
+        };
+      });
+    }
+
+    memberIds.forEach(id => {
+      if (!presentIds.has(id)) {
+        baseList.push({
+          userId: id,
+          fullName: `User ${id.slice(-4).toUpperCase()}`,
+        } as any);
+      }
+    });
+
+    return baseList.map((p) => ({
       ...p,
       fullName:
         memberProfiles[p.userId]?.fullName?.trim() ||
@@ -130,7 +174,7 @@ export function ChatWindow({
         `User ${p.userId.slice(-4).toUpperCase()}`,
       avatar: memberProfiles[p.userId]?.avatar || p.avatar,
     }));
-  }, [conversation?.participants, isGroup, memberProfiles]);
+  }, [conversation?.participants, isGroup, memberProfiles, otherId, peerProfiles, user?.fullName, user?.avatar, userId, memberIds]);
 
   const title =
     conversation && userId
@@ -154,20 +198,61 @@ export function ChatWindow({
 
   const handleFiles = useCallback(
     async (files: FileList) => {
-      const items = attachments.addFiles(files);
-      for (const item of items) {
-        attachments.updateUpload(item.id, { status: "uploading", progress: 0 });
-        const signal = attachments.getAbortSignal(item.id);
+      const allFiles = Array.from(files);
+      const mediaFiles = allFiles.filter(isMediaFile);
+      const otherFiles = allFiles.filter((f) => !isMediaFile(f));
+      const sendAsCluster = shouldSendAsMediaCluster(mediaFiles);
+
+      const uploadOne = async (file: File, messageType: Parameters<typeof sendWithAttachment>[1]) => {
+        const [uploadItem] = attachments.addFiles([file]);
+        if (!uploadItem) return;
+        attachments.updateUpload(uploadItem.id, { status: "uploading", progress: 0 });
+        const signal = attachments.getAbortSignal(uploadItem.id);
         try {
-          await sendWithAttachment(item.file, item.messageType, replyTo?._id, signal);
-          attachments.updateUpload(item.id, { status: "done", progress: 100 });
-          attachments.removeUpload(item.id);
+          await sendWithAttachment(file, messageType, replyTo?._id, signal);
+          attachments.updateUpload(uploadItem.id, { status: "done", progress: 100 });
+          attachments.removeUpload(uploadItem.id);
         } catch {
-          attachments.updateUpload(item.id, { status: "failed" });
+          attachments.updateUpload(uploadItem.id, { status: "failed" });
+        }
+      };
+
+      if (sendAsCluster) {
+        const uploadItems = attachments.addFiles(mediaFiles);
+        uploadItems.forEach((u) => attachments.updateUpload(u.id, { status: "uploading", progress: 0 }));
+        const idByIndex = uploadItems.map((u) => u.id);
+        try {
+          await sendMediaCluster(mediaFiles, replyTo?._id, {
+            onFileProgress: (fileIndex, percent) => {
+              const id = idByIndex[fileIndex];
+              if (id) attachments.updateUpload(id, { status: "uploading", progress: percent });
+            },
+            getSignal: (fileIndex) => {
+              const id = idByIndex[fileIndex];
+              return id ? attachments.getAbortSignal(id) : undefined;
+            },
+          });
+          idByIndex.forEach((id) => {
+            attachments.updateUpload(id, { status: "done", progress: 100 });
+            attachments.removeUpload(id);
+          });
+        } catch {
+          idByIndex.forEach((id) => attachments.updateUpload(id, { status: "failed" }));
+          showToast("Gửi cụm ảnh/video thất bại", "error");
+        }
+      } else {
+        for (const file of mediaFiles) {
+          const type = file.type.startsWith("video/") ? "VIDEO" : "IMAGE";
+          await uploadOne(file, type);
         }
       }
+
+      for (const file of otherFiles) {
+        const type = file.type.startsWith("audio/") ? "VOICE" : "FILE";
+        await uploadOne(file, type);
+      }
     },
-    [attachments, sendWithAttachment, replyTo]
+    [attachments, sendWithAttachment, sendMediaCluster, replyTo, showToast]
   );
 
   const handleVoiceRecorded = useCallback(
@@ -211,7 +296,9 @@ export function ChatWindow({
         });
       }
       setForwardMessageIds([]);
-      showToast("Đã chuyển tiếp tin nhắn");
+      showToast(
+        msgs.length > 1 ? `Đã chuyển tiếp ${msgs.length} tin nhắn` : "Đã chuyển tiếp tin nhắn"
+      );
     },
     [userId, socket, showToast]
   );
@@ -222,9 +309,9 @@ export function ChatWindow({
     setShowForwardModal(true);
   }, []);
 
-  const handleForwardOne = useCallback(
-    (messageId: string) => {
-      openForwardModal([messageId]);
+  const handleForward = useCallback(
+    (messageIds: string[]) => {
+      openForwardModal(messageIds);
     },
     [openForwardModal]
   );
@@ -233,6 +320,10 @@ export function ChatWindow({
     setJumpToMessageId(messageId);
     setTimeout(() => setJumpToMessageId(null), 100);
   }, []);
+
+  useEffect(() => {
+    setUi({ replyToId: null, editingId: null, isAtBottom: true });
+  }, [conversationId, setUi]);
 
   useEffect(() => {
     if (!userId) return;
@@ -386,6 +477,7 @@ export function ChatWindow({
         style={bg.background.backgroundStyle}
       >
         <MessageList
+          conversationId={conversationId}
           messages={messages}
           calls={calls}
           currentUserId={userId!}
@@ -400,7 +492,7 @@ export function ChatWindow({
           onEdit={(m) => setUi({ editingId: m._id, replyToId: null })}
           onDeleteForMe={(id) => void handleDeleteForMe(id)}
           onRecall={(id) => void handleRecall(id)}
-          onForward={handleForwardOne}
+          onForward={handleForward}
           allowEdit={!isGroup}
           onReact={handleReact}
           onRemoveReaction={handleRemoveReaction}

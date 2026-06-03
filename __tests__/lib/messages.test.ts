@@ -76,4 +76,29 @@ describe("messages lib", () => {
     const label = formatDateSeparator(new Date().toISOString());
     expect(label).toBe("Hôm nay");
   });
+
+  it("lists each image as its own message row", () => {
+    const items = groupMessagesForList(
+      [
+        msg({
+          _id: "1",
+          senderId: "u1",
+          type: "IMAGE",
+          content: "https://cdn/1.jpg",
+          createdAt: "2026-05-31T10:00:00Z",
+        }),
+        msg({
+          _id: "2",
+          senderId: "u1",
+          type: "IMAGE",
+          content: "https://cdn/2.jpg",
+          createdAt: "2026-05-31T10:02:00Z",
+        }),
+      ],
+      "me"
+    );
+    const rows = items.filter((i) => i.kind === "message");
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.kind === "message" && (r.message.type === "IMAGE"))).toBe(true);
+  });
 });

@@ -13,7 +13,13 @@ import {
   setCachedMessages,
   QueuedOutgoingMessage,
 } from "@/src/lib/message-cache";
-import { uploadFile, retryWithBackoff } from "@/src/services/api/uploads";
+import { uploadFile, uploadFileViaPresigned, retryWithBackoff } from "@/src/services/api/uploads";
+import {
+  IMediaClusterItem,
+  mediaClusterItemTypeFromFile,
+  mediaClusterMetadata,
+  serializeMediaClusterItems,
+} from "@/src/lib/media-cluster";
 import { useQueryClient } from "@tanstack/react-query";
 
 const PAGE_LIMIT = 50;
@@ -176,6 +182,7 @@ export function useMessages(conversationId: string | undefined, currentUserId: s
       },
       onMessageRecalled: ({ messageId }) => {
         useChatStore.getState().updateMessage(conversationId, messageId, { isRecalled: true });
+        queryClient.invalidateQueries({ queryKey: ["conversations", currentUserId] });
       },
       onMessagePinnedUpdate: ({ conversationId: cid }) => {
         if (cid === conversationId) {
@@ -329,6 +336,79 @@ export function useMessages(conversationId: string | undefined, currentUserId: s
     [conversationId, currentUserId]
   );
 
+  const sendMediaCluster = useCallback(
+    async (
+      files: File[],
+      replyTo?: string,
+      options?: {
+        onFileProgress?: (fileIndex: number, percent: number) => void;
+        getSignal?: (fileIndex: number) => AbortSignal | undefined;
+      }
+    ) => {
+      if (!conversationId || !currentUserId || !files.length) return;
+      const clientTempId = tempId();
+      const optimistic: IMessage = {
+        _id: clientTempId,
+        clientTempId,
+        conversationId,
+        senderId: currentUserId,
+        type: "MEDIA_CLUSTER",
+        content: "[]",
+        metadata: mediaClusterMetadata([]),
+        status: "SENDING",
+        isRecalled: false,
+        deletedBy: [],
+        reactions: [],
+        seenBy: [],
+        replyTo,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      useChatStore.getState().upsertMessage(conversationId, optimistic);
+
+      try {
+        const clusterItems: IMediaClusterItem[] = [];
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const uploaded = await retryWithBackoff(() =>
+            uploadFileViaPresigned(file, {
+              signal: options?.getSignal?.(i),
+              onProgress: (percent) => options?.onFileProgress?.(i, percent),
+            })
+          );
+          clusterItems.push({
+            url: uploaded.url,
+            type: mediaClusterItemTypeFromFile(file),
+            thumbnail: uploaded.thumbnail,
+          });
+        }
+
+        const content = serializeMediaClusterItems(clusterItems);
+        const metadata = mediaClusterMetadata(clusterItems);
+
+        socketRef.current?.sendMessage({
+          conversationId,
+          senderId: currentUserId,
+          type: "MEDIA_CLUSTER",
+          content,
+          metadata,
+          ...(replyTo ? { replyToId: replyTo } : {}),
+          clientTempId,
+        });
+
+        useChatStore.getState().updateMessage(conversationId, clientTempId, {
+          content,
+          metadata,
+          status: "SENT",
+        });
+      } catch {
+        useChatStore.getState().updateMessage(conversationId, clientTempId, { status: "FAILED" });
+        throw new Error("MEDIA_CLUSTER_UPLOAD_FAILED");
+      }
+    },
+    [conversationId, currentUserId]
+  );
+
   const editMessage = useCallback(
     async (messageId: string, content: string) => {
       if (!conversationId) return;
@@ -386,6 +466,7 @@ export function useMessages(conversationId: string | undefined, currentUserId: s
     loadInitial,
     sendText,
     sendWithAttachment,
+    sendMediaCluster,
     editMessage,
     recallMessage,
     deleteMessageForMe,
