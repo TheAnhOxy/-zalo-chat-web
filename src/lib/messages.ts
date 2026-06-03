@@ -37,6 +37,10 @@ export function groupMessagesForList(
   const items: MessageGroupItem[] = [];
   let lastDateKey = "";
   let lastSenderId = "";
+  let lastMessageTime: number | null = null;
+
+  /** Ngưỡng thời gian gộp nhóm tin nhắn: 10 phút */
+  const GROUP_THRESHOLD_MS = 10 * 60 * 1000;
 
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
@@ -50,6 +54,7 @@ export function groupMessagesForList(
       items.push({ kind: "date", key: `date-${dateKey}`, label: formatDateSeparator(message.createdAt) });
       lastDateKey = dateKey;
       lastSenderId = "";
+      lastMessageTime = null;
     }
 
     if (message.type === "SYSTEM") {
@@ -59,11 +64,16 @@ export function groupMessagesForList(
         message,
       });
       lastSenderId = "";
+      lastMessageTime = null;
       continue;
     }
 
     const isMine = message.senderId === currentUserId;
-    const showAvatar = !isMine && message.senderId !== lastSenderId;
+
+    // Hiển thị avatar khi: khác người gửi HOẶC cách tin nhắn trước > 10 phút
+    const timeSinceLast = lastMessageTime !== null ? date.getTime() - lastMessageTime : Infinity;
+    const sameGroup = message.senderId === lastSenderId && timeSinceLast <= GROUP_THRESHOLD_MS;
+    const showAvatar = !isMine && !sameGroup;
 
     if (message.type === "IMAGE" || message.type === "VIDEO") {
       let addedToExisting = false;
@@ -102,6 +112,7 @@ export function groupMessagesForList(
     }
 
     lastSenderId = message.senderId;
+    lastMessageTime = date.getTime();
 
     if (message.replyTo && replyMap?.[message.replyTo]) {
       void replyMap[message.replyTo];
