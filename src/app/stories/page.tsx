@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { Plus, Play, Eye, ImageIcon } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useAuthGuard } from "@/src/hooks/use-auth-guard";
@@ -22,7 +22,7 @@ function timeAgo(dateStr?: string): string {
   return `${Math.floor(diff / 86400)} ngày trước`;
 }
 
-export default function StoriesPage() {
+function StoriesPageContent() {
   const auth = useAuthGuard();
   const { explore, feed, isLoading, refetchAll } = useStories();
   
@@ -253,5 +253,13 @@ export default function StoriesPage() {
         />
       )}
     </main>
+  );
+}
+
+export default function StoriesPage() {
+  return (
+    <Suspense fallback={<PageLoader />}>
+      <StoriesPageContent />
+    </Suspense>
   );
 }

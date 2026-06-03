@@ -4,7 +4,7 @@ import { useAuthGuard } from "./use-auth-guard";
 
 export const useStories = () => {
   const auth = useAuthGuard();
-  const userId = auth.user?.id || auth.user?._id;
+  const userId = auth.user?._id;
   const queryClient = useQueryClient();
 
   const exploreQuery = useQuery({
