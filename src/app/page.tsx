@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import {
   Eye,
   EyeOff,
@@ -38,7 +38,7 @@ import axios from "axios";
 
 type SettingsTab = "GENERAL" | "SECURITY" | "PRIVACY" | "SESSIONS";
 
-export default function HomePage() {
+function HomePageContent() {
   const auth = useAuthGuard();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -753,5 +753,13 @@ export default function HomePage() {
         </div>
       ) : null}
     </main>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense fallback={<PageLoader />}>
+      <HomePageContent />
+    </Suspense>
   );
 }

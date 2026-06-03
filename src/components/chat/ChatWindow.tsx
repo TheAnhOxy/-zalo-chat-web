@@ -280,8 +280,10 @@ export function ChatWindow({
   }, [setUi]);
 
   useEffect(() => {
-    const handler = (payload: Record<string, unknown>) => {
-      const cid = String(payload.conversationId ?? payload._id ?? "");
+    const handler = (payload: unknown) => {
+      if (!payload || typeof payload !== "object") return;
+      const data = payload as Record<string, unknown>;
+      const cid = String(data.conversationId ?? data._id ?? "");
       if (cid === conversationId) {
         void refetch();
         bg.refreshBackground();

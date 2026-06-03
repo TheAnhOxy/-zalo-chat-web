@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { Suspense, useEffect, useMemo } from "react";
 import { callService } from "@/src/services/call/call-service";
 import { useParams, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -16,7 +16,7 @@ import {
 import { profileCacheForUser, usePeerProfile } from "@/src/hooks/usePeerProfile";
 import { resolveMemberDisplay, useGroupMemberProfiles } from "@/src/hooks/useGroupMemberProfiles";
 
-export default function CallPage() {
+function CallPageContent() {
   const auth = useAuthGuard();
   const params = useParams();
   const searchParams = useSearchParams();
@@ -206,5 +206,19 @@ export default function CallPage() {
         returnHref={returnHref}
       />
     )
+  );
+}
+
+export default function CallPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-[100dvh] items-center justify-center bg-slate-950">
+          <Loader2 className="h-8 w-8 animate-spin text-white" />
+        </div>
+      }
+    >
+      <CallPageContent />
+    </Suspense>
   );
 }

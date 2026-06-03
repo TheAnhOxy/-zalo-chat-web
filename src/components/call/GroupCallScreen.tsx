@@ -385,7 +385,7 @@ export function GroupCallScreen({
               onClick={() => {
                 const next = !speakerOn;
                 setSpeakerOn(next);
-                callService.toggleSpeaker?.(next);
+                callService.toggleSpeaker(next);
               }}
               className={`flex h-12 w-12 items-center justify-center rounded-full transition ${
                 speakerOn ? "bg-white/15 hover:bg-white/25" : "bg-orange-500/60 hover:bg-orange-500"

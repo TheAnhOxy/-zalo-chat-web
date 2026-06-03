@@ -315,6 +315,13 @@ class CallService {
   toggleVideo(enabled: boolean) {
     this.localStream?.getVideoTracks().forEach((t) => (t.enabled = enabled));
   }
+  /** Web: không chuyển loa ngoài như mobile; tắt/bật phát âm thanh từ xa trên thẻ audio. */
+  toggleSpeaker(speakerOn: boolean) {
+    if (typeof document === "undefined") return;
+    document.querySelectorAll("audio").forEach((el) => {
+      el.muted = !speakerOn;
+    });
+  }
 
   private registerSocketHandlers() {
     socketService.on(SOCKET_CALL_SERVER.incomingCall, this.onIncomingCallEvent);
