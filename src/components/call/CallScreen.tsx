@@ -75,6 +75,7 @@ export function CallScreen({
   const [error, setError] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
   const closingRef = useRef(false);
+  const initializedRef = useRef(false);
 
   const connected = callState === "connected";
   const wasConnectedRef = useRef(false);
@@ -167,7 +168,9 @@ export function CallScreen({
   }, []);
 
   useEffect(() => {
-    if (initialized) return;
+    // Guard: only run once — prevents re-init on re-render or StrictMode double-invoke
+    if (initializedRef.current) return;
+    initializedRef.current = true;
     let cancelled = false;
 
     (async () => {
@@ -197,7 +200,7 @@ export function CallScreen({
           });
         }
       } catch {
-        if (!cancelled) setError("Không truy cập được micro/camera");
+        if (!cancelled) setError("Không thể truy cập được micro/camera");
       } finally {
         if (!cancelled) setInitialized(true);
       }
@@ -206,16 +209,8 @@ export function CallScreen({
     return () => {
       cancelled = true;
     };
-  }, [
-    autoAnswer,
-    callId,
-    conversationId,
-    initialized,
-    isIncoming,
-    isVideo,
-    offer,
-    peer.userId,
-  ]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run only once on mount — initializedRef guards re-renders
 
   useEffect(() => {
     return () => {

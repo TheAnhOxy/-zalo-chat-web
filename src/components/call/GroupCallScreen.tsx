@@ -61,8 +61,10 @@ export function GroupCallScreen({
   const [streams, setStreams] = useState<Record<string, MediaStream>>({});
   const [error, setError] = useState<string | null>(null);
   const closingRef = useRef(false);
+  const initializedRef = useRef(false);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
+  const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
 
   const meAndPeers = useMemo(() => {
     const map = new Map<string, GroupPeerInfo>();
@@ -185,14 +187,25 @@ export function GroupCallScreen({
 
   useEffect(() => {
     Object.entries(streams).forEach(([peerId, stream]) => {
-      const el = videoRefs.current[peerId];
-      if (!el) return;
-      el.srcObject = stream;
-      void el.play().catch(() => undefined);
+      // Attach to video element (for video calls)
+      const videoEl = videoRefs.current[peerId];
+      if (videoEl) {
+        videoEl.srcObject = stream;
+        void videoEl.play().catch(() => undefined);
+      }
+      // Always attach to audio element for voice audio playback
+      const audioEl = audioRefs.current[peerId];
+      if (audioEl) {
+        audioEl.srcObject = stream;
+        void audioEl.play().catch(() => undefined);
+      }
     });
   }, [streams]);
 
   useEffect(() => {
+    // Guard: only initialize once to prevent double-call when deps change (e.g. participants re-render)
+    if (initializedRef.current) return;
+    initializedRef.current = true;
     let cancelled = false;
     (async () => {
       try {
@@ -237,7 +250,8 @@ export function GroupCallScreen({
     return () => {
       cancelled = true;
     };
-  }, [autoAnswer, callId, callerId, conversationId, isIncoming, isVideo, offer, participants]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run only once on mount — initializedRef guards against StrictMode double-invoke
 
   useEffect(() => {
     if (state !== "ended") return;
@@ -300,6 +314,15 @@ export function GroupCallScreen({
                 className="relative flex overflow-hidden rounded-xl bg-[#1a202c]"
                 style={{ aspectRatio: "3/4" }}
               >
+                {/* Hidden audio element — always needed to play remote audio (especially for voice-only calls) */}
+                <audio
+                  ref={(el) => {
+                    audioRefs.current[peer.userId] = el;
+                  }}
+                  autoPlay
+                  playsInline
+                  className="hidden"
+                />
                 {hasVideo ? (
                   <video
                     ref={(el) => {
