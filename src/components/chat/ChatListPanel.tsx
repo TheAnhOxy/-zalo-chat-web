@@ -104,10 +104,17 @@ function buildListItem(
     }
   } else if (lastMessage) {
     timeSource = lastMessage.createdAt;
+    
+    let senderName: string | undefined;
+    if (isGroup && lastMessage.senderId !== currentUserId) {
+      senderName = profiles[lastMessage.senderId]?.fullName || "Ai đó";
+    }
+
     preview = formatLastMessagePreview(lastMessage.content, {
       type: lastMessage.type,
       senderId: lastMessage.senderId,
       currentUserId,
+      senderName,
     });
     isMissedCall = preview.toLowerCase().includes("cuộc gọi nhỡ");
   }

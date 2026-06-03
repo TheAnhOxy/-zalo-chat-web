@@ -36,6 +36,9 @@ interface MessageItemProps {
   isPinned?: boolean;
   onPin?: () => void;
   onUnpin?: () => void;
+  mediaLayout?: "auto" | "square" | "wide";
+  hideTimeAndStatus?: boolean;
+  groupedMessages?: IMessage[];
 }
 
 export function MessageItem({
@@ -62,6 +65,9 @@ export function MessageItem({
   isPinned = false,
   onPin,
   onUnpin,
+  mediaLayout = "auto",
+  hideTimeAndStatus = false,
+  groupedMessages,
 }: MessageItemProps) {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const hideToolbarTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -92,8 +98,20 @@ export function MessageItem({
   useEffect(() => () => clearHideToolbarTimer(), []);
   const reactionPlacement: AnchorPlacement = isMine ? "top-end" : "top-start";
   const menuPlacement: AnchorPlacement = "bottom-start";
-  const myReaction = currentUserReaction(message.reactions, currentUserId);
-  const reactionGroups = groupReactions(message.reactions, currentUserId);
+  const mergedReactions = groupedMessages 
+    ? groupedMessages.flatMap(m => m.reactions || []) 
+    : message.reactions || [];
+    
+  // Lọc unique reactions (1 user chỉ được 1 loại reaction trong cả cụm, nếu có nhiều thì lấy cái đầu tiên tìm thấy)
+  const uniqueReactions = Object.values(
+    mergedReactions.reduce((acc, r) => {
+      if (!acc[r.userId]) acc[r.userId] = r;
+      return acc;
+    }, {} as Record<string, any>)
+  );
+
+  const myReaction = currentUserReaction(uniqueReactions, currentUserId);
+  const reactionGroups = groupReactions(uniqueReactions, currentUserId);
 
   const handlePickReaction = (type: ReactionType) => {
     if (myReaction === type) {
@@ -131,7 +149,7 @@ export function MessageItem({
 
   return (
     <div
-      className={`group flex max-w-full min-w-0 gap-2 overflow-hidden px-3 py-0.5 ${isMine ? "flex-row-reverse" : "flex-row"} ${isHighlighted ? "bg-blue-50/50 transition-colors duration-1000" : ""}`}
+      className={`group flex max-w-full min-w-0 gap-2 px-3 py-0.5 ${isMine ? "flex-row-reverse" : "flex-row"} ${isHighlighted ? "bg-blue-50/50 transition-colors duration-1000" : ""}`}
       role="listitem"
       aria-label={`Tin nhắn ${isMine ? "của bạn" : "đối phương"}`}
     >
@@ -180,16 +198,20 @@ export function MessageItem({
             aria-hidden
           />
           <div
-            className={`relative min-w-0 rounded-2xl px-3 py-2 text-sm shadow-sm animate-message-in ${
-              isMine
-                ? "rounded-br-md bg-[var(--qc-primary)] text-white"
-                : "rounded-bl-md border border-[var(--qc-divider)] bg-white text-[var(--qc-text-primary)]"
+            className={`relative min-w-0 text-sm animate-message-in ${
+              groupedMessages || message.type === "IMAGE" || message.type === "VIDEO"
+                ? "bg-transparent shadow-none" // Không bọc bubble cho cụm ảnh/video
+                : `rounded-2xl px-3 py-2 shadow-sm ${
+                    isMine
+                      ? "rounded-br-md bg-[var(--qc-primary)] text-white"
+                      : "rounded-bl-md border border-[var(--qc-divider)] bg-white text-[var(--qc-text-primary)]"
+                  }`
             }`}
             onDoubleClick={() => handlePickReaction("LIKE")}
             title="Nhấp đúp để thích"
           >
-            {renderBody(message, safeContent, isCallMeta, locale)}
-            {message.editedAt && (
+            {renderBody(message, safeContent, isCallMeta, locale, mediaLayout, groupedMessages)}
+            {message.editedAt && !groupedMessages && (
               <span className="ml-1 text-[10px] text-gray-400">({t("edited", locale)})</span>
             )}
           </div>
@@ -284,42 +306,86 @@ export function MessageItem({
           </div>
         )}
 
-        <div className={`mt-0.5 flex items-center gap-1 text-[10px] text-gray-400 ${isMine ? "justify-end" : ""}`}>
-          <time dateTime={String(message.createdAt)}>{formatMessageTime(message.createdAt)}</time>
-          {isMine && <StatusIcon status={message.status} />}
-          {message.status === "FAILED" && onRetry && (
-            <button type="button" className="text-red-500 underline" onClick={onRetry}>
-              {t("retry", locale)}
-            </button>
-          )}
-        </div>
+        {!hideTimeAndStatus && (
+          <div className={`mt-0.5 flex items-center gap-1 text-[10px] text-gray-400 ${isMine ? "justify-end" : ""}`}>
+            <time dateTime={String(message.createdAt)}>{formatMessageTime(message.createdAt)}</time>
+            {isMine && <StatusIcon status={message.status} />}
+            {message.status === "FAILED" && onRetry && (
+              <button type="button" className="text-red-500 underline" onClick={onRetry}>
+                {t("retry", locale)}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function renderBody(message: IMessage, safeContent: string, isCallMeta: boolean, locale: ChatLocale) {
+function renderBody(
+  message: IMessage, 
+  safeContent: string, 
+  isCallMeta: boolean, 
+  locale: ChatLocale, 
+  mediaLayout: "auto" | "square" | "wide",
+  groupedMessages?: IMessage[]
+) {
   if (isCallMeta) {
     return <p className="text-zalo-blue font-medium">{t("callEnded", locale)}</p>;
   }
+
+  if (groupedMessages && groupedMessages.length > 0) {
+    if (groupedMessages.length === 1) {
+      const m = groupedMessages[0];
+      const mediaClass = "w-auto max-w-full max-h-80 rounded-2xl object-contain";
+      if (m.type === "VIDEO") {
+        return <video src={m.content} controls className={mediaClass} />;
+      }
+      return <img src={m.content} alt={m.metadata?.fileName ?? "Ảnh"} className={mediaClass} />;
+    }
+
+    return (
+      <div className={`grid gap-1 grid-cols-2`}>
+        {groupedMessages.map((m, idx) => {
+          const isOddLast = groupedMessages.length % 2 !== 0 && idx === groupedMessages.length - 1;
+          const mediaClass = isOddLast 
+            ? "w-full aspect-video rounded-xl object-cover border border-gray-100/10"
+            : "w-full aspect-square rounded-xl object-cover border border-gray-100/10";
+          
+          if (m.type === "VIDEO") {
+            return <video key={m._id} src={m.content} controls className={`${mediaClass} ${isOddLast ? "col-span-2" : ""}`} />;
+          }
+          // eslint-disable-next-line @next/next/no-img-element
+          return <img key={m._id} src={m.content} alt={m.metadata?.fileName ?? "Ảnh"} className={`${mediaClass} ${isOddLast ? "col-span-2" : ""}`} />;
+        })}
+      </div>
+    );
+  }
+
+  const mediaClass = (() => {
+    if (mediaLayout === "square") return "w-full aspect-square rounded-xl object-cover border border-gray-100/10";
+    if (mediaLayout === "wide") return "w-full aspect-video rounded-xl object-cover border border-gray-100/10";
+    return "w-auto max-w-full max-h-80 rounded-2xl object-contain";
+  })();
+
   switch (message.type) {
     case "IMAGE":
       return (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={message.content} alt={message.metadata?.fileName ?? "Ảnh"} className="max-h-64 rounded-lg" />
+        <img src={message.content} alt={message.metadata?.fileName ?? "Ảnh"} className={mediaClass} />
       );
     case "VIDEO":
-      return <video src={message.content} controls className="max-h-64 rounded-lg" />;
+      return <video src={message.content} controls className={mediaClass} />;
     case "VOICE":
       return <audio src={message.content} controls className="h-10 w-full min-w-[200px] outline-none" />;
     case "FILE":
       return (
-        <a href={message.content} download className="text-zalo-blue underline">
+        <a href={message.content} download className="text-zalo-blue underline break-all line-clamp-2">
           {message.metadata?.fileName ?? "Tệp đính kèm"}
         </a>
       );
     default:
-      return <p dangerouslySetInnerHTML={{ __html: safeContent }} />;
+      return <p dangerouslySetInnerHTML={{ __html: safeContent }} className="break-words" />;
   }
 }
 

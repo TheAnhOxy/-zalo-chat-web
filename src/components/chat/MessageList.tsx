@@ -344,56 +344,33 @@ export function MessageList({
                     onViewAllPinned={onViewAllPinned}
                   />
                 ) : item.kind === "mediaGroup" ? (
-                  <div className={`flex max-w-full min-w-0 gap-2 overflow-hidden px-3 py-0.5 ${item.isMine ? "flex-row-reverse" : "flex-row"}`}>
-                    {!item.isMine && item.showAvatar && (
-                      <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-zalo-light">
-                        {participantMap[item.messages[0].senderId]?.avatar ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={participantMap[item.messages[0].senderId]?.avatar} alt="" className="h-full w-full object-cover" />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-white" aria-hidden>
-                            {participantMap[item.messages[0].senderId]?.name?.charAt(0).toUpperCase() || "?"}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {!item.isMine && !item.showAvatar && <div className="w-8 shrink-0" aria-hidden />}
-                    
-                    <div className={`grid gap-1 max-w-[75%] sm:max-w-[65%] ${item.messages.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}>
-                      {item.messages.map((m) => (
-                        <div key={m._id} className="relative">
-                          <MessageItem
-                            message={m}
-                            isMine={item.isMine}
-                            showAvatar={false}
-                            hideAvatarSpace={true}
-                            fullWidth={true}
-                            avatar={participantMap[m.senderId]?.avatar}
-                            senderName={participantMap[m.senderId]?.name}
-                            locale={locale}
-                            isHighlighted={highlightedId === m._id}
-                            onJumpToReply={m.replyTo ? () => handleJumpToMessage(m.replyTo!) : undefined}
-                            onReply={() => onReply(m)}
-                            onEdit={
-                              allowEdit && item.isMine ? () => onEdit(m) : undefined
-                            }
-                            onDeleteForMe={() => onDeleteForMe(m._id)}
-                            onRecall={() => onRecall(m._id)}
-                            onForward={() => onForward(m._id)}
-                            currentUserId={currentUserId}
-                            onReact={(type) => onReact(m._id, type)}
-                            onRemoveReaction={
-                              onRemoveReaction ? () => onRemoveReaction(m._id) : undefined
-                            }
-                            onRetry={() => onRetry(m)}
-                            isPinned={pinnedIdSet.has(m._id)}
-                            onPin={onPin && !pinnedIdSet.has(m._id) ? () => onPin(m._id) : undefined}
-                            onUnpin={onUnpin && pinnedIdSet.has(m._id) ? () => onUnpin(m._id) : undefined}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  <MessageItem
+                    key={item.key}
+                    message={item.messages[item.messages.length - 1]}
+                    groupedMessages={item.messages}
+                    isMine={item.isMine}
+                    showAvatar={item.showAvatar}
+                    fullWidth={false}
+                    avatar={participantMap[item.messages[0].senderId]?.avatar}
+                    senderName={participantMap[item.messages[0].senderId]?.name}
+                    locale={locale}
+                    isHighlighted={item.messages.some(m => m._id === highlightedId)}
+                    onJumpToReply={item.messages[item.messages.length - 1].replyTo ? () => handleJumpToMessage(item.messages[item.messages.length - 1].replyTo!) : undefined}
+                    onReply={() => onReply(item.messages[item.messages.length - 1])}
+                    onEdit={undefined}
+                    onDeleteForMe={() => item.messages.forEach(m => onDeleteForMe(m._id))}
+                    onRecall={() => item.messages.forEach(m => onRecall(m._id))}
+                    onForward={() => item.messages.forEach(m => onForward(m._id))}
+                    currentUserId={currentUserId}
+                    onReact={(type) => item.messages.forEach(m => onReact(m._id, type))}
+                    onRemoveReaction={
+                      onRemoveReaction ? () => item.messages.forEach(m => onRemoveReaction(m._id)) : undefined
+                    }
+                    onRetry={() => item.messages.forEach(m => onRetry(m))}
+                    isPinned={item.messages.some(m => pinnedIdSet.has(m._id))}
+                    onPin={onPin ? () => item.messages.forEach(m => { if (!pinnedIdSet.has(m._id)) onPin(m._id); }) : undefined}
+                    onUnpin={onUnpin ? () => item.messages.forEach(m => { if (pinnedIdSet.has(m._id)) onUnpin(m._id); }) : undefined}
+                  />
                 ) : item.kind === "message" ? (
                   <MessageItem
                     message={item.message}
