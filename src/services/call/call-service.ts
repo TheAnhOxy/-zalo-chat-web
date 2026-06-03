@@ -315,10 +315,22 @@ class CallService {
   toggleVideo(enabled: boolean) {
     this.localStream?.getVideoTracks().forEach((t) => (t.enabled = enabled));
   }
-  /** Web: không chuyển loa ngoài như mobile; tắt/bật phát âm thanh từ xa trên thẻ audio. */
+  /**
+   * Web: tắt/bật âm thanh từ xa.
+   * Mute cả <audio> lẫn <video> vì trong group video call, remote stream
+   * được phát qua <video autoPlay> — nếu chỉ mute audio thì loa vẫn phát.
+   */
   toggleSpeaker(speakerOn: boolean) {
     if (typeof document === "undefined") return;
+    // Mute remote audio elements (voice call, group voice call)
     document.querySelectorAll("audio").forEach((el) => {
+      el.muted = !speakerOn;
+    });
+    // Mute remote video elements (1-1 video call, group video call)
+    // Chỉ mute các video element KHÔNG phải local PiP (local video luôn muted=true sẵn)
+    document.querySelectorAll("video").forEach((el) => {
+      // Bỏ qua local video (đã có attribute muted cố định)
+      if (el.hasAttribute("data-local")) return;
       el.muted = !speakerOn;
     });
   }

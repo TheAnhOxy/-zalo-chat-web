@@ -48,7 +48,7 @@ function CallPageContent() {
     return other?.userId;
   }, [callerIdParam, conversation, isIncoming, peerIdParam, userId]);
 
-  const { data: peerUser } = usePeerProfile(peerUserId, Boolean(peerUserId));
+  const { data: peerUser, isLoading: isPeerUserLoading } = usePeerProfile(peerUserId, Boolean(peerUserId));
   const peerProfiles = profileCacheForUser(peerUserId, peerUser);
   const groupMemberIds = useMemo(() => {
     const ids = (conversation?.participants ?? [])
@@ -139,7 +139,17 @@ function CallPageContent() {
   const returnHref = conversationId ? `/?conversation=${conversationId}` : "/";
   const isGroupConversation = conversation?.type === "GROUP";
 
-  if (!auth.isInitialized || isLoading) {
+  // Determine if peer info is still being resolved.
+  // For incoming calls: peerUserId comes from callerIdParam (URL) so it's immediately available,
+  // but peerUser profile might still be loading. We should wait before evaluating `peer`.
+  const isPeerLoading =
+    Boolean(peerUserId) &&
+    !isGroupConversation &&
+    !isGroupFromQuery &&
+    isPeerUserLoading &&
+    !peer; // once `peer` is resolved, stop waiting
+
+  if (!auth.isInitialized || isLoading || isPeerLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-[#1a1a2e] text-white">
         <Loader2 className="h-8 w-8 animate-spin" />

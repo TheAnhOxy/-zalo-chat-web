@@ -44,7 +44,7 @@ interface MessageListProps {
 
 type ChatItem = 
   | MessageGroupItem
-  | ({ kind: "call" } & { call: ICall; key: string; createdAt: Date });
+  | ({ kind: "call" } & { call: ICall; key: string; createdAt: Date; showAvatar: boolean; isMine: boolean });
 
 export function MessageList({
   messages,
@@ -137,32 +137,81 @@ export function MessageList({
     });
   }, [messageGroups, searchQuery]);
 
-  // Combine filtered groups with calls in chronological order
+  // Combine filtered groups with calls in chronological order,
+  // then compute showAvatar grouping across all item types (including calls)
   const groups = useMemo(() => {
     const result: ChatItem[] = [...filteredGroups];
     
-    // Add calls to the list
+    // Add calls to the list (showAvatar will be computed in second pass below)
     for (const call of calls) {
       result.push({
         kind: "call",
         call,
         key: `call-${call._id}`,
         createdAt: new Date(call.createdAt),
+        showAvatar: true,  // placeholder — overwritten in second pass
+        isMine: call.callerId === currentUserId,
       });
     }
 
-    const itemTime = (item: (typeof result)[number]) => {
-      if ("createdAt" in item && item.createdAt) return item.createdAt.getTime();
+    const itemTime = (item: (typeof result)[number]): number => {
+      if (item.kind === "call") return item.createdAt.getTime();
       if (item.kind === "system") return new Date(item.message.createdAt).getTime();
       if (item.kind === "message") return new Date(item.message.createdAt).getTime();
       if (item.kind === "mediaGroup") {
         return new Date(item.messages[item.messages.length - 1].createdAt).getTime();
       }
+      if (item.kind === "date") return 0;
       return 0;
     };
 
-    return result.sort((a, b) => itemTime(a) - itemTime(b));
-  }, [filteredGroups, calls]);
+    result.sort((a, b) => itemTime(a) - itemTime(b));
+
+    /** Ngưỡng 30 phút để gộp nhóm (dùng cho call bubbles) */
+    const GROUP_MS = 30 * 60 * 1000;
+
+    // Second pass: tính showAvatar cho call items dựa vào item liền trước
+    let lastSenderId = "";
+    let lastTime = 0;
+    for (const item of result) {
+      if (item.kind === "date") {
+        // Ngày mới → reset group
+        lastSenderId = "";
+        lastTime = 0;
+        continue;
+      }
+      if (item.kind === "system") {
+        // System message ngắt group
+        lastSenderId = "";
+        lastTime = 0;
+        continue;
+      }
+
+      const t = itemTime(item);
+      const senderId =
+        item.kind === "call"
+          ? item.call.callerId
+          : item.kind === "message"
+            ? item.message.senderId
+            : item.kind === "mediaGroup"
+              ? item.messages[0].senderId
+              : "";
+
+      if (item.kind === "call") {
+        const isMine = item.call.callerId === currentUserId;
+        const sameGroup = senderId === lastSenderId && t - lastTime <= GROUP_MS;
+        // Ghi đè showAvatar đã placeholder
+        (item as { showAvatar: boolean }).showAvatar = !isMine && !sameGroup;
+      }
+
+      if (senderId) {
+        lastSenderId = senderId;
+        lastTime = t;
+      }
+    }
+
+    return result;
+  }, [filteredGroups, calls, currentUserId]);
 
   // For jumpToMessage - use unfiltered groups
   const allGroups = useMemo(() => {
@@ -391,7 +440,8 @@ export function MessageList({
                   (() => {
                     const call = item.call;
                     const isMine = call.callerId === currentUserId;
-                    const isMissed = call.status === "MISSED" || call.status === "REJECTED";
+                    // "Nhỡ" chỉ thực sự là nhỡ từ góc nhìn người NHẬN — người gọi thấy "không được trả lời"
+                    const isMissedForReceiver = !isMine && (call.status === "MISSED" || call.status === "REJECTED");
                     const isVideo = call.type === "VIDEO";
                     
                     // Format duration
@@ -409,9 +459,11 @@ export function MessageList({
 
                     const statusLabel = (() => {
                       if (isMine) {
-                        return call.status === "MISSED" ? "Cuộc gọi không được trả lời" : `Cuộc gọi ${isVideo ? "video" : "thoại"}`;
+                        return call.status === "MISSED" || call.status === "REJECTED"
+                          ? `Cuộc gọi ${isVideo ? "video" : "thoại"} không được trả lời`
+                          : `Cuộc gọi ${isVideo ? "video" : "thoại"}`;
                       }
-                      if (isMissed) {
+                      if (call.status === "MISSED" || call.status === "REJECTED") {
                         return "Cuộc gọi nhỡ";
                       }
                       return `Cuộc gọi ${isVideo ? "video" : "thoại"}`;
@@ -419,7 +471,8 @@ export function MessageList({
 
                     return (
                       <div className={`flex gap-2 px-3 py-0.5 ${isMine ? "flex-row-reverse" : "flex-row"}`}>
-                        {!isMine && (
+                        {/* Avatar / spacer theo grouping */}
+                        {!isMine && item.showAvatar && (
                           <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gray-300">
                             {participantMap[call.callerId]?.avatar ? (
                               // eslint-disable-next-line @next/next/no-img-element
@@ -431,33 +484,44 @@ export function MessageList({
                             )}
                           </div>
                         )}
+                        {/* Spacer khi ẩn avatar để giữ căn lề */}
+                        {(!isMine && !item.showAvatar) && <div className="w-8 shrink-0" aria-hidden />}
                         {isMine && <div className="w-8 shrink-0" aria-hidden />}
                         
-                        <div
-                          className={`flex items-center gap-2 rounded-lg px-3 py-2 max-w-xs ${
-                            isMissed
-                              ? "bg-red-100 text-red-700"
-                              : isMine
-                                ? "bg-green-100 text-green-700"
-                                : "bg-blue-100 text-blue-700"
-                          }`}
-                        >
-                          <div className="flex flex-col gap-1">
-                            <div className="flex items-center gap-1.5">
-                              {isVideo ? (
-                                isMissed ? <VideoOff className="h-4 w-4" /> : <Video className="h-4 w-4" />
-                              ) : isMissed ? (
-                                <PhoneMissed className="h-4 w-4" />
-                              ) : (
-                                <Phone className="h-4 w-4" />
-                              )}
-                              <span className="text-sm font-medium">{statusLabel}</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-xs">
-                              <span>{durationLabel || "Không có nội dung"}</span>
-                              <span className="shrink-0 opacity-70">
-                                {formatChatTime(call.createdAt)}
-                              </span>
+                        <div className={`flex flex-col ${isMine ? "items-end" : "items-start"}`}>
+                          {/* Tên người gọi — chỉ hiện ở tin đầu nhóm (!isMine && showAvatar) */}
+                          {!isMine && item.showAvatar && participantMap[call.callerId]?.name && (
+                            <p className="mb-1 max-w-full truncate pl-1 text-[11px] text-[var(--qc-text-secondary)]">
+                              {participantMap[call.callerId].name}
+                            </p>
+                          )}
+                          <div
+                            className={`flex items-center gap-2 rounded-lg px-3 py-2 max-w-xs ${
+                              isMissedForReceiver
+                                ? "bg-red-100 text-red-700"        // người nhận thấy cuộc gọi nhỡ → đỏ
+                                : isMine
+                                  ? "bg-green-100 text-green-700"  // người gọi → xanh lá
+                                  : "bg-blue-100 text-blue-700"    // người nhận cuộc gọi thành công → xanh
+                            }`}
+                          >
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-1.5">
+                                {/* Icon: chỉ dùng missed icon khi người nhận thấy cuộc gọi nhỡ */}
+                                {isVideo ? (
+                                  isMissedForReceiver ? <VideoOff className="h-4 w-4" /> : <Video className="h-4 w-4" />
+                                ) : isMissedForReceiver ? (
+                                  <PhoneMissed className="h-4 w-4" />
+                                ) : (
+                                  <Phone className="h-4 w-4" />
+                                )}
+                                <span className="text-sm font-medium">{statusLabel}</span>
+                              </div>
+                              <div className="flex items-center gap-2 text-xs">
+                                <span>{durationLabel || "Không có nội dung"}</span>
+                                <span className="shrink-0 opacity-70">
+                                  {formatChatTime(call.createdAt)}
+                                </span>
+                              </div>
                             </div>
                           </div>
                         </div>
