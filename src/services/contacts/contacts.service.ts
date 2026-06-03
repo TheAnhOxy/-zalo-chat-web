@@ -140,8 +140,8 @@ export const contactsService = {
     }
   },
 
-  sendFriendRequest(requesterId: string, receiverId: string, message?: string) {
-    return apiClient.post(`/friendships`, { requesterId, addresseeId: receiverId, message });
+  sendFriendRequest(requesterId: string, receiverId: string, _message?: string) {
+    return apiClient.post(`/friendships`, { requesterId, addresseeId: receiverId });
   },
 
   /** Quan hệ giữa hai user (giống mobile getFriendshipBetween). */
