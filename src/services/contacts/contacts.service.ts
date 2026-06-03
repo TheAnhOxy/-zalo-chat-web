@@ -1,4 +1,6 @@
 import { apiClient } from "@/src/services/api/client";
+import { parseConversationFromApi } from "@/src/lib/parse-api";
+import { IConversation } from "@/src/types/conversation";
 import { IUser } from "@/src/types/user";
 
 export interface GroupItem {
@@ -38,11 +40,31 @@ export const contactsService = {
     }
   },
 
-  getGroups(userId: string) {
-    return apiClient.get<any[]>(`/conversations/member/${userId}`).then((res) => {
-      const groups = res.data.filter((c: any) => c.type === "GROUP");
-      return groups as GroupItem[];
-    });
+  async getGroups(userId: string): Promise<GroupItem[]> {
+    const res = await apiClient.get<unknown>(`/conversations/member/${userId}`);
+    const rows = Array.isArray(res.data) ? res.data : [];
+    const groups = rows
+      .filter((c) => (c as { type?: string }).type === "GROUP")
+      .map((c) => parseConversationFromApi(c as Record<string, unknown>))
+      .map((conv) => ({
+        _id: conv._id,
+        name: conv.name?.trim() || "Nhóm",
+        description: conv.description,
+        avatar: conv.avatar?.trim() || undefined,
+        memberCount: conv.participants.length,
+        updatedAt:
+          typeof conv.updatedAt === "string"
+            ? conv.updatedAt
+            : new Date(conv.updatedAt).toISOString(),
+        members: conv.participants.map((p) => ({
+          userId: p.userId,
+          role: p.role ?? "MEMBER",
+        })),
+      }))
+      .sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+      );
+    return groups;
   },
 
   async getReceivedRequests(userId: string) {
@@ -147,14 +169,17 @@ export const contactsService = {
       role: id === creatorId ? "ADMIN" : "MEMBER",
     }));
 
-    const payload: any = {
+    const payload: Record<string, unknown> = {
       type: "GROUP",
       name,
       members,
     };
     if (avatar) payload.avatar = avatar;
 
-    return apiClient.post(`/conversations`, payload).then(res => res.data);
+    return apiClient.post<unknown>(`/conversations`, payload).then((res) => {
+      const raw = (res.data as { data?: unknown })?.data ?? res.data;
+      return parseConversationFromApi(raw as Record<string, unknown>) as IConversation;
+    });
   },
 
   async findOrCreateDirectConversation(currentUserId: string, targetUserId: string) {

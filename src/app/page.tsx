@@ -2,7 +2,6 @@
 
 import Image from "next/image";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { socketService } from "@/src/services/socket/socket.service";
 import { useEffect, useRef, useState } from "react";
 import {
   Eye,
@@ -97,31 +96,6 @@ export default function HomePage() {
     enabled: Boolean(auth.isInitialized && currentUserId),
     staleTime: 30_000,
   });
-
-  // ✅ Real-time: cập nhật danh sách conversation khi có tin nhắn mới
-  useEffect(() => {
-    if (!currentUserId) return;
-
-    const handleNewMessage = () => {
-      queryClient.invalidateQueries({ queryKey: ["conversations", currentUserId] });
-    };
-
-    const handleConversationUpdated = () => {
-      queryClient.invalidateQueries({ queryKey: ["conversations", currentUserId] });
-    };
-
-    socketService.on("new_message", handleNewMessage);
-    socketService.on("conversation_updated", handleConversationUpdated);
-    socketService.on("conversation_created", handleConversationUpdated);
-    socketService.on("conversation_removed", handleConversationUpdated);
-
-    return () => {
-      socketService.off("new_message", handleNewMessage);
-      socketService.off("conversation_updated", handleConversationUpdated);
-      socketService.off("conversation_created", handleConversationUpdated);
-      socketService.off("conversation_removed", handleConversationUpdated);
-    };
-  }, [currentUserId, queryClient]);
 
   useEffect(() => {
     if (!profile) {
@@ -322,7 +296,7 @@ export default function HomePage() {
           />
         ) : null}
 
-        <section className="relative h-full min-h-0 bg-white">
+        <section className="relative h-full min-h-0 min-w-0 overflow-hidden bg-white">
           {activeConversationId ? (
             <ChatWindow
               conversationId={activeConversationId}

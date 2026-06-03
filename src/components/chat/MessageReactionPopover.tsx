@@ -2,6 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import { ReactionType } from "@/src/types/message";
+import { AnchorPortal } from "@/src/components/chat/AnchorPortal";
+import { AnchorPlacement } from "@/src/hooks/useAnchorPosition";
 
 const REACTIONS: { type: ReactionType; emoji: string }[] = [
   { type: "LIKE", emoji: "👍" },
@@ -15,7 +17,8 @@ const REACTIONS: { type: ReactionType; emoji: string }[] = [
 interface MessageReactionPopoverProps {
   open: boolean;
   anchorRef: React.RefObject<HTMLElement | null>;
-  align?: "left" | "right";
+  placement?: AnchorPlacement;
+  activeType?: ReactionType | null;
   onClose: () => void;
   onReact: (type: ReactionType) => void;
 }
@@ -23,7 +26,8 @@ interface MessageReactionPopoverProps {
 export function MessageReactionPopover({
   open,
   anchorRef,
-  align = "left",
+  placement = "top-center",
+  activeType = null,
   onClose,
   onReact,
 }: MessageReactionPopoverProps) {
@@ -40,31 +44,35 @@ export function MessageReactionPopover({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open, onClose, anchorRef]);
 
-  if (!open) return null;
-
   return (
-    <div
-      ref={ref}
-      className={`absolute top-full z-50 mt-1 flex gap-0.5 rounded-full border border-[var(--qc-divider)] bg-white px-1.5 py-1 shadow-lg ${
-        align === "right" ? "right-0" : "left-0"
-      }`}
-      role="toolbar"
-      aria-label="Chọn cảm xúc"
-    >
-      {REACTIONS.map(({ type, emoji }) => (
-        <button
-          key={type}
-          type="button"
-          className="rounded-full p-1 text-xl leading-none transition hover:bg-[var(--qc-bg)]"
-          onClick={() => {
-            onReact(type);
-            onClose();
-          }}
-          aria-label={type}
-        >
-          {emoji}
-        </button>
-      ))}
-    </div>
+    <AnchorPortal open={open} anchorRef={anchorRef} placement={placement} offset={8}>
+      <div
+        ref={ref}
+        className="flex gap-0.5 whitespace-nowrap rounded-full border border-[var(--qc-divider)] bg-white px-1.5 py-1 shadow-lg"
+        role="toolbar"
+        aria-label="Chọn cảm xúc"
+      >
+        {REACTIONS.map(({ type, emoji }) => {
+          const selected = activeType === type;
+          return (
+            <button
+              key={type}
+              type="button"
+              className={`rounded-full p-1 text-xl leading-none transition hover:bg-[var(--qc-bg)] ${
+                selected ? "bg-[var(--qc-primary-light)] ring-2 ring-[var(--qc-primary)]/50" : ""
+              }`}
+              onClick={() => {
+                onReact(type);
+                onClose();
+              }}
+              aria-label={selected ? `Thu hồi ${type}` : type}
+              title={selected ? "Thu hồi cảm xúc" : undefined}
+            >
+              {emoji}
+            </button>
+          );
+        })}
+      </div>
+    </AnchorPortal>
   );
 }

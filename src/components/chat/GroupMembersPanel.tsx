@@ -32,6 +32,10 @@ import {
   resolveMemberDisplay,
   useGroupMemberProfiles,
 } from "@/src/hooks/useGroupMemberProfiles";
+import {
+  emitMakeAdminSystemMessage,
+  emitRevokeAdminSystemMessage,
+} from "@/src/lib/group-chat-system";
 
 interface GroupMembersPanelProps {
   conversation: IConversation;
@@ -167,6 +171,21 @@ export function GroupMembersPanel({
           actionTarget.userId,
           newRole
         );
+        if (isPromote) {
+          emitMakeAdminSystemMessage(
+            conversation._id,
+            currentUserId,
+            currentUserDisplayName,
+            name
+          );
+        } else {
+          emitRevokeAdminSystemMessage(
+            conversation._id,
+            currentUserId,
+            currentUserDisplayName,
+            name
+          );
+        }
         setMembers(updated.participants);
         onUpdated(updated);
         showToast(isPromote ? `Đã thêm quản trị viên: ${name}` : `Đã hủy quyền quản trị viên: ${name}`);
@@ -177,7 +196,17 @@ export function GroupMembersPanel({
         setBusy(false);
       }
     },
-    [actionTarget, adminCount, conversation._id, members, onUpdated, profiles, showToast]
+    [
+      actionTarget,
+      adminCount,
+      conversation._id,
+      currentUserId,
+      currentUserDisplayName,
+      members,
+      onUpdated,
+      profiles,
+      showToast,
+    ]
   );
 
   const actionDisplay = actionTarget

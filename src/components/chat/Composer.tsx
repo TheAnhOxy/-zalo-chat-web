@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { Send, Square, Trash, ThumbsUp, Smile } from "lucide-react";
+import { Send, Square, Trash, ThumbsUp, Smile, PlusCircle } from "lucide-react";
 import { EmojiPicker } from "@/src/components/chat/EmojiPicker";
 import { t, ChatLocale } from "@/src/lib/i18n/chat";
 import { AttachmentPicker } from "@/src/components/chat/AttachmentPicker";
@@ -23,6 +23,7 @@ interface ComposerProps {
   onCancelReply: () => void;
   onCancelEdit: () => void;
   onVoiceRecorded?: (file: File) => void;
+  onOpenActions?: () => void;
 }
 
 export function Composer({
@@ -39,6 +40,7 @@ export function Composer({
   onCancelReply,
   onCancelEdit,
   onVoiceRecorded,
+  onOpenActions,
 }: ComposerProps) {
   const [text, setText] = useState(editingMessage?.content ?? "");
   const [showEmoji, setShowEmoji] = useState(false);
@@ -110,6 +112,16 @@ export function Composer({
       <form onSubmit={handleSubmit} className="flex items-end gap-1 px-2.5 py-2.5">
         {!isRecording && (
           <>
+            {onOpenActions ? (
+              <button
+                type="button"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--qc-primary)] hover:bg-[var(--qc-primary-light)]"
+                onClick={onOpenActions}
+                aria-label="Thêm"
+              >
+                <PlusCircle className="h-6 w-6" />
+              </button>
+            ) : null}
             <button
               type="button"
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-[var(--qc-primary)] hover:bg-[var(--qc-primary-light)]"

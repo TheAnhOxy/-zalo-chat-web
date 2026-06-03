@@ -141,6 +141,15 @@ export function countGroupAdmins(participants: IConversationParticipant[]): numb
   return participants.filter((p) => p.role === "ADMIN").length;
 }
 
+/** Chỉ còn một QTV và đó là userId — không cho rời (giống mobile). */
+export function isSoleAdmin(
+  participants: IConversationParticipant[],
+  userId: string
+): boolean {
+  if (countGroupAdmins(participants) !== 1) return false;
+  return isGroupAdmin(participants, userId);
+}
+
 export function roleLabel(role?: string): string {
   if (role === "ADMIN") return "Quản trị viên";
   if (role === "MODERATOR") return "Điều hành viên";

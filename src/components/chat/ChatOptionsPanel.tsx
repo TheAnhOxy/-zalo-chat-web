@@ -32,6 +32,7 @@ import { conversationsApi } from "@/src/services/api/conversations";
 import {
   conversationGroupApi,
   isGroupAdmin,
+  isSoleAdmin,
 } from "@/src/services/api/conversation-group";
 import { contactsService } from "@/src/services/contacts/contacts.service";
 import { AddMembersModal } from "@/src/components/chat/AddMembersModal";
@@ -62,6 +63,10 @@ import { AddToGroupModal } from "@/src/components/chat/AddToGroupModal";
 import { ConversationStoragePanel } from "@/src/components/chat/ConversationStoragePanel";
 import { GroupDescriptionDialog } from "@/src/components/chat/GroupDescriptionDialog";
 import { PinnedMessagesPanel } from "@/src/components/chat/PinnedMessagesPanel";
+import {
+  emitAddMemberSystemMessages,
+  emitLeaveGroupSystemMessage,
+} from "@/src/lib/group-chat-system";
 
 interface ChatOptionsPanelProps {
   open: boolean;
@@ -84,6 +89,7 @@ interface ChatOptionsPanelProps {
   onMemberKicked?: () => void;
   currentUserDisplayName?: string;
   openWallpaperSection?: boolean;
+  openPinnedSection?: boolean;
 }
 
 function SectionGap() {
@@ -222,6 +228,7 @@ export function ChatOptionsPanel({
   onMemberKicked,
   currentUserDisplayName = "Bạn",
   openWallpaperSection = false,
+  openPinnedSection = false,
 }: ChatOptionsPanelProps) {
   const router = useRouter();
   const { showToast } = useToast();
@@ -291,6 +298,7 @@ export function ChatOptionsPanel({
   useEffect(() => {
     if (!open) return;
     if (openWallpaperSection) setShowWallpaper(true);
+    if (openPinnedSection) setShowPinnedList(true);
     setIsPinned(Boolean(me?.isPinned));
     setIsMuted(readMuteState(conversation._id).isMuted);
 
@@ -305,7 +313,15 @@ export function ChatOptionsPanel({
         setMediaPreview(media.slice(-3).reverse());
       })
       .catch(() => setMediaPreview([]));
-  }, [open, openWallpaperSection, conversation._id, conversation.pinnedMessages, currentUserId, me?.isPinned]);
+  }, [
+    open,
+    openWallpaperSection,
+    openPinnedSection,
+    conversation._id,
+    conversation.pinnedMessages,
+    currentUserId,
+    me?.isPinned,
+  ]);
 
   const togglePin = useCallback(
     async (value: boolean) => {
@@ -355,11 +371,23 @@ export function ChatOptionsPanel({
 
   const handleLeaveGroup = useCallback(async () => {
     setConfirmLeave(false);
+    if (isSoleAdmin(groupConversation.participants, currentUserId)) {
+      showToast(
+        "Bạn là quản trị viên duy nhất. Hãy thêm quản trị viên khác trước khi rời nhóm.",
+        "error"
+      );
+      return;
+    }
     try {
       await conversationGroupApi.leaveGroup(
         groupConversation._id,
         currentUserId,
         groupConversation.participants
+      );
+      emitLeaveGroupSystemMessage(
+        groupConversation._id,
+        currentUserId,
+        currentUserDisplayName
       );
       showToast("Đã rời nhóm");
       onClose();
@@ -367,7 +395,14 @@ export function ChatOptionsPanel({
     } catch {
       showToast("Rời nhóm thất bại", "error");
     }
-  }, [groupConversation, currentUserId, onClose, onLeftGroup, showToast]);
+  }, [
+    groupConversation,
+    currentUserId,
+    currentUserDisplayName,
+    onClose,
+    onLeftGroup,
+    showToast,
+  ]);
 
   const openInviteLinkPanel = useCallback(async () => {
     setShowInviteLink(true);
@@ -535,6 +570,12 @@ export function ChatOptionsPanel({
           groupConversation.participants,
           userIds
         );
+        await emitAddMemberSystemMessages(
+          groupConversation._id,
+          currentUserId,
+          currentUserDisplayName,
+          userIds
+        );
         setGroupConversation(updated);
         setShowAddMembers(false);
         showToast(`Đã thêm ${userIds.length} thành viên`);
@@ -545,7 +586,7 @@ export function ChatOptionsPanel({
         setAddMembersLoading(false);
       }
     },
-    [groupConversation, onConversationUpdated, showToast]
+    [groupConversation, currentUserId, currentUserDisplayName, onConversationUpdated, showToast]
   );
 
   if (!open) return null;
@@ -888,12 +929,12 @@ export function ChatOptionsPanel({
           onSelect={handleMuteDuration}
         />
 
-        {showPinnedList && isGroup ? (
+        {showPinnedList ? (
           <PinnedMessagesPanel
             conversationId={groupConversation._id}
             userId={currentUserId}
             participants={groupConversation.participants}
-            chatAvatar={groupConversation.avatar}
+            chatAvatar={headerAvatar}
             initialMessages={pinnedMessages}
             onBack={() => setShowPinnedList(false)}
             onOpenMessage={(messageId) => {
@@ -906,30 +947,6 @@ export function ChatOptionsPanel({
               void refreshPinned();
             }}
           />
-        ) : showPinnedList ? (
-          <SubPanelShell title="Tin nhắn đã ghim" onBack={() => setShowPinnedList(false)}>
-            {pinnedMessages.length === 0 ? (
-              <p className="p-8 text-center text-sm text-[var(--qc-text-secondary)]">Chưa có tin nhắn ghim</p>
-            ) : (
-              pinnedMessages.map((m) => (
-                <button
-                  key={m._id}
-                  type="button"
-                  className="block w-full border-b border-[var(--qc-divider)] px-4 py-3.5 text-left hover:bg-[var(--qc-card)]"
-                  onClick={() => {
-                    onOpenPinnedMessage?.(m._id);
-                    setShowPinnedList(false);
-                    onClose();
-                  }}
-                >
-                  <p className="truncate text-sm text-[var(--qc-text-primary)]">{m.content || `[${m.type}]`}</p>
-                  <p className="mt-1 text-xs text-[var(--qc-text-secondary)]">
-                    {new Date(m.createdAt).toLocaleString("vi-VN")}
-                  </p>
-                </button>
-              ))
-            )}
-          </SubPanelShell>
         ) : null}
 
         {showMediaList ? (
@@ -1082,9 +1099,10 @@ export function ChatOptionsPanel({
             open={showAddToGroup}
             onClose={() => setShowAddToGroup(false)}
             currentUserId={currentUserId}
+            currentUserName={currentUserDisplayName}
             targetUserId={peerUserId}
             targetName={displayPeer}
-            onSuccess={() => showToast(`Đã thêm ${displayPeer} vào nhóm`)}
+            onSuccess={() => onConversationUpdated?.()}
           />
         ) : null}
 
@@ -1132,7 +1150,7 @@ export function ChatOptionsPanel({
             <div className="w-full max-w-sm rounded-2xl bg-[var(--qc-card)] p-5 shadow-xl">
               <h3 className="text-base font-bold text-[var(--qc-text-primary)]">Rời nhóm</h3>
               <p className="mt-2 text-sm text-[var(--qc-text-secondary)]">
-                Bạn sẽ không còn nhận tin nhắn từ nhóm này. Bạn có chắc muốn rời?
+                Bạn có chắc muốn rời khỏi nhóm &quot;{title}&quot;?
               </p>
               <div className="mt-5 flex justify-end gap-2">
                 <button

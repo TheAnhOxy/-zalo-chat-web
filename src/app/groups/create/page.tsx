@@ -2,16 +2,20 @@
 
 import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuthGuard } from "@/src/hooks/use-auth-guard";
 import { useFriends } from "@/src/hooks/use-contacts";
 import { contactsService } from "@/src/services/contacts/contacts.service";
 import { useToast } from "@/src/components/providers/toast-provider";
+import { IConversation } from "@/src/types/conversation";
+import { socketService } from "@/src/services/socket/socket.service";
 import { ArrowLeft, Check, Users } from "lucide-react";
 import Image from "next/image";
 
 function CreateGroupContent() {
   const auth = useAuthGuard();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const searchParams = useSearchParams();
   const prefillId = searchParams.get("prefill");
   const { showToast } = useToast();
@@ -52,9 +56,24 @@ function CreateGroupContent() {
       if (avatarFile) {
         avatarUrl = await contactsService.uploadGroupAvatar(avatarFile);
       }
-      await contactsService.createGroup(groupName.trim(), memberIds, auth.user._id, avatarUrl);
+      const conversation = await contactsService.createGroup(
+        groupName.trim(),
+        memberIds,
+        auth.user._id,
+        avatarUrl
+      );
+
+      queryClient.setQueryData<IConversation[]>(["conversations", auth.user._id], (old) => {
+        const list = old ?? [];
+        if (list.some((c) => c._id === conversation._id)) return list;
+        return [conversation, ...list];
+      });
+      void queryClient.invalidateQueries({ queryKey: ["conversations", auth.user._id] });
+
+      socketService.emit("join_conversation", { conversationId: conversation._id });
+
       showToast("Tạo nhóm thành công", "success");
-      router.push("/contacts");
+      router.push(`/?conversation=${conversation._id}`);
     } catch (e) {
       showToast("Lỗi tạo nhóm", "error");
     } finally {

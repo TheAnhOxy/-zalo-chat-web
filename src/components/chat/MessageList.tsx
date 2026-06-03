@@ -10,6 +10,8 @@ import { t, ChatLocale } from "@/src/lib/i18n/chat";
 import { useChatStore } from "@/src/store/chat-store";
 import { IConversationParticipant } from "@/src/types/conversation";
 import { PinnedMessagesHeader } from "@/src/components/chat/PinnedMessagesHeader";
+import { SystemMessageLine } from "@/src/components/chat/SystemMessageLine";
+import { formatSystemMessageText } from "@/src/lib/system-message";
 import { formatChatTime } from "@/src/lib/date-utils";
 import { Phone, PhoneMissed, Video, VideoOff } from "lucide-react";
 
@@ -33,9 +35,11 @@ interface MessageListProps {
   /** Chỉ chat 1-1 có Sửa trong menu (mobile) */
   allowEdit?: boolean;
   onReact: (messageId: string, type: ReactionType) => void;
+  onRemoveReaction?: (messageId: string) => void;
   onRetry: (message: IMessage) => void;
   onUnpin?: (messageId: string) => void;
   onPin?: (messageId: string) => void;
+  onViewAllPinned?: () => void;
 }
 
 type ChatItem = 
@@ -61,9 +65,11 @@ export function MessageList({
   onForward,
   allowEdit = true,
   onReact,
+  onRemoveReaction,
   onRetry,
   onUnpin,
   onPin,
+  onViewAllPinned,
 }: MessageListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
   const setUi = useChatStore((s) => s.setUi);
@@ -122,6 +128,11 @@ export function MessageList({
       if (item.kind === "mediaGroup") {
         return item.messages.some((m) => messageMatchesSearch(m, searchQuery));
       }
+      if (item.kind === "system") {
+        return formatSystemMessageText(item.message)
+          .toLowerCase()
+          .includes(searchQuery.toLowerCase());
+      }
       return true; // Keep date separators
     });
   }, [messageGroups, searchQuery]);
@@ -140,12 +151,17 @@ export function MessageList({
       });
     }
 
-    // Sort by createdAt
-    return result.sort((a, b) => {
-      const timeA = "createdAt" in a ? a.createdAt.getTime() : 0;
-      const timeB = "createdAt" in b ? b.createdAt.getTime() : 0;
-      return timeA - timeB;
-    });
+    const itemTime = (item: (typeof result)[number]) => {
+      if ("createdAt" in item && item.createdAt) return item.createdAt.getTime();
+      if (item.kind === "system") return new Date(item.message.createdAt).getTime();
+      if (item.kind === "message") return new Date(item.message.createdAt).getTime();
+      if (item.kind === "mediaGroup") {
+        return new Date(item.messages[item.messages.length - 1].createdAt).getTime();
+      }
+      return 0;
+    };
+
+    return result.sort((a, b) => itemTime(a) - itemTime(b));
   }, [filteredGroups, calls]);
 
   // For jumpToMessage - use unfiltered groups
@@ -214,7 +230,7 @@ export function MessageList({
   }
 
   return (
-    <div className="relative flex flex-1 flex-col overflow-hidden bg-transparent">
+    <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-transparent">
       {pinnedMessages && pinnedMessages.length > 0 && (
         <PinnedMessagesHeader
           messages={pinnedMessages}
@@ -238,7 +254,7 @@ export function MessageList({
 
       <div
         ref={parentRef}
-        className="flex-1 overflow-y-auto px-1 py-2"
+        className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-1 py-2"
         onScroll={handleScroll}
         role="log"
         aria-label="Danh sách tin nhắn"
@@ -264,15 +280,22 @@ export function MessageList({
                   top: 0,
                   left: 0,
                   width: "100%",
+                  maxWidth: "100%",
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
+                className="max-w-full overflow-x-hidden"
               >
                 {item.kind === "date" ? (
                   <div className="my-3 text-center text-xs text-gray-500" role="separator">
                     {item.label}
                   </div>
+                ) : item.kind === "system" ? (
+                  <SystemMessageLine
+                    message={item.message}
+                    onViewAllPinned={onViewAllPinned}
+                  />
                 ) : item.kind === "mediaGroup" ? (
-                  <div className={`flex gap-2 px-3 py-0.5 ${item.isMine ? "flex-row-reverse" : "flex-row"}`}>
+                  <div className={`flex max-w-full min-w-0 gap-2 overflow-hidden px-3 py-0.5 ${item.isMine ? "flex-row-reverse" : "flex-row"}`}>
                     {!item.isMine && item.showAvatar && (
                       <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-zalo-light">
                         {participantMap[item.messages[0].senderId]?.avatar ? (
@@ -308,7 +331,11 @@ export function MessageList({
                             onDeleteForMe={() => onDeleteForMe(m._id)}
                             onRecall={() => onRecall(m._id)}
                             onForward={() => onForward(m._id)}
+                            currentUserId={currentUserId}
                             onReact={(type) => onReact(m._id, type)}
+                            onRemoveReaction={
+                              onRemoveReaction ? () => onRemoveReaction(m._id) : undefined
+                            }
                             onRetry={() => onRetry(m)}
                             isPinned={pinnedIdSet.has(m._id)}
                             onPin={onPin && !pinnedIdSet.has(m._id) ? () => onPin(m._id) : undefined}
@@ -340,7 +367,13 @@ export function MessageList({
                     onDeleteForMe={() => onDeleteForMe(item.message._id)}
                     onRecall={() => onRecall(item.message._id)}
                     onForward={() => onForward(item.message._id)}
+                    currentUserId={currentUserId}
                     onReact={(type) => onReact(item.message._id, type)}
+                    onRemoveReaction={
+                      onRemoveReaction
+                        ? () => onRemoveReaction(item.message._id)
+                        : undefined
+                    }
                     onRetry={() => onRetry(item.message)}
                     isPinned={pinnedIdSet.has(item.message._id)}
                     onPin={

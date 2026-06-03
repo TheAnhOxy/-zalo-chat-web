@@ -1,18 +1,21 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { IMessage, ReactionType } from "@/src/types/message";
 import { sanitizeMessageHtml, plainTextFromHtml } from "@/src/lib/sanitize";
 import { formatMessageTime, getStatusIconLabel } from "@/src/lib/messages";
 import { t, ChatLocale } from "@/src/lib/i18n/chat";
+import { currentUserReaction, groupReactions, reactionEmoji } from "@/src/lib/reactions";
 import { MessageHoverToolbar } from "@/src/components/chat/MessageHoverToolbar";
 import { MessageMoreMenu } from "@/src/components/chat/MessageMoreMenu";
 import { MessageReactionPopover } from "@/src/components/chat/MessageReactionPopover";
+import { AnchorPlacement } from "@/src/hooks/useAnchorPosition";
 import { Check, CheckCheck } from "lucide-react";
 
 interface MessageItemProps {
   message: IMessage;
   isMine: boolean;
+  currentUserId?: string;
   showAvatar?: boolean;
   replyPreview?: string;
   locale?: ChatLocale;
@@ -22,6 +25,7 @@ interface MessageItemProps {
   onRecall?: () => void;
   onForward?: () => void;
   onReact: (type: ReactionType) => void;
+  onRemoveReaction?: () => void;
   onRetry?: () => void;
   avatar?: string;
   hideAvatarSpace?: boolean;
@@ -37,6 +41,7 @@ interface MessageItemProps {
 export function MessageItem({
   message,
   isMine,
+  currentUserId = "",
   showAvatar,
   replyPreview,
   locale = "vi",
@@ -46,6 +51,7 @@ export function MessageItem({
   onRecall,
   onForward,
   onReact,
+  onRemoveReaction,
   onRetry,
   avatar,
   hideAvatarSpace,
@@ -58,65 +64,44 @@ export function MessageItem({
   onUnpin,
 }: MessageItemProps) {
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const hideToolbarTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [reactionOpen, setReactionOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
 
   const toolbarVisible = hovered || menuOpen || reactionOpen;
-  /** Menu căn dưới nút ⋮ (ngoài cùng trái với tin mình, ngoài cùng phải với tin người khác) */
-  const menuAlign = isMine ? "left" : "right";
 
-  const renderToolbar = (dotsOnEnd: boolean, canRecall: boolean) => (
-    <div ref={toolbarRef} className="relative shrink-0 self-center">
-      <MessageHoverToolbar
-        visible={toolbarVisible}
-        dotsOnEnd={dotsOnEnd}
-        moreActive={menuOpen}
-        onMore={() => {
-          setReactionOpen(false);
-          setMenuOpen((v) => !v);
-        }}
-        onReply={() => {
-          setMenuOpen(false);
-          setReactionOpen(false);
-          onReply();
-        }}
-        onReaction={() => {
-          setMenuOpen(false);
-          setReactionOpen((v) => !v);
-        }}
-      />
-      <MessageMoreMenu
-        open={menuOpen}
-        anchorRef={toolbarRef}
-        align={menuAlign}
-        locale={locale}
-        isMine={isMine}
-        isPinned={isPinned}
-        canRecall={canRecall}
-        onClose={() => {
-          setMenuOpen(false);
-          setHovered(false);
-        }}
-        onEdit={onEdit}
-        onRecall={onRecall}
-        onForward={onForward ?? (() => undefined)}
-        onPin={onPin}
-        onUnpin={onUnpin}
-        onDeleteForMe={onDeleteForMe}
-      />
-      <MessageReactionPopover
-        open={reactionOpen}
-        anchorRef={toolbarRef}
-        align={menuAlign}
-        onClose={() => {
-          setReactionOpen(false);
-          setHovered(false);
-        }}
-        onReact={onReact}
-      />
-    </div>
-  );
+  const clearHideToolbarTimer = () => {
+    if (hideToolbarTimerRef.current) {
+      clearTimeout(hideToolbarTimerRef.current);
+      hideToolbarTimerRef.current = null;
+    }
+  };
+
+  const handleActionsEnter = () => {
+    clearHideToolbarTimer();
+    setHovered(true);
+  };
+
+  const handleActionsLeave = () => {
+    if (menuOpen || reactionOpen) return;
+    clearHideToolbarTimer();
+    hideToolbarTimerRef.current = setTimeout(() => setHovered(false), 280);
+  };
+
+  useEffect(() => () => clearHideToolbarTimer(), []);
+  const reactionPlacement: AnchorPlacement = isMine ? "top-end" : "top-start";
+  const menuPlacement: AnchorPlacement = "bottom-start";
+  const myReaction = currentUserReaction(message.reactions, currentUserId);
+  const reactionGroups = groupReactions(message.reactions, currentUserId);
+
+  const handlePickReaction = (type: ReactionType) => {
+    if (myReaction === type) {
+      onRemoveReaction?.();
+    } else {
+      onReact(type);
+    }
+  };
 
   if (message.isRecalled) {
     return (
@@ -146,7 +131,7 @@ export function MessageItem({
 
   return (
     <div
-      className={`group flex gap-2 px-3 py-0.5 ${isMine ? "flex-row-reverse" : "flex-row"} ${isHighlighted ? "bg-blue-50/50 transition-colors duration-1000" : ""}`}
+      className={`group flex max-w-full min-w-0 gap-2 overflow-hidden px-3 py-0.5 ${isMine ? "flex-row-reverse" : "flex-row"} ${isHighlighted ? "bg-blue-50/50 transition-colors duration-1000" : ""}`}
       role="listitem"
       aria-label={`Tin nhắn ${isMine ? "của bạn" : "đối phương"}`}
     >
@@ -165,11 +150,7 @@ export function MessageItem({
       {!isMine && !showAvatar && !hideAvatarSpace && <div className="w-8 shrink-0" aria-hidden />}
 
       <div
-        className={`relative ${fullWidth ? "w-full" : "max-w-[75%] sm:max-w-[65%]"} ${isMine ? "items-end" : "items-start"} flex flex-col`}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => {
-          if (!menuOpen && !reactionOpen) setHovered(false);
-        }}
+        className={`relative min-w-0 ${fullWidth ? "w-full" : "max-w-[75%] sm:max-w-[65%]"} ${isMine ? "items-end" : "items-start"} flex flex-col`}
       >
         {!isMine && senderName && showAvatar ? (
           <p className="mb-1 max-w-full truncate pl-1 text-[11px] text-[var(--qc-text-secondary)]">{senderName}</p>
@@ -184,15 +165,28 @@ export function MessageItem({
           </button>
         )}
 
-        <div className="flex max-w-full items-center gap-1.5">
-          {isMine ? renderToolbar(false, isMine && !message.isRecalled && Boolean(onRecall)) : null}
-
+        <div
+          className={`relative inline-flex max-w-full min-w-0 ${isMine ? "ml-auto" : ""}`}
+          onMouseEnter={handleActionsEnter}
+          onMouseLeave={handleActionsLeave}
+        >
+          {/* Vùng đệm vô hình: di chuột từ bubble sang toolbar không mất hover */}
+          <div
+            className={`absolute z-10 ${
+              isMine
+                ? "right-full top-1/2 h-10 w-2 -translate-y-1/2"
+                : "left-full top-1/2 h-10 w-2 -translate-y-1/2"
+            }`}
+            aria-hidden
+          />
           <div
             className={`relative min-w-0 rounded-2xl px-3 py-2 text-sm shadow-sm animate-message-in ${
               isMine
                 ? "rounded-br-md bg-[var(--qc-primary)] text-white"
                 : "rounded-bl-md border border-[var(--qc-divider)] bg-white text-[var(--qc-text-primary)]"
             }`}
+            onDoubleClick={() => handlePickReaction("LIKE")}
+            title="Nhấp đúp để thích"
           >
             {renderBody(message, safeContent, isCallMeta, locale)}
             {message.editedAt && (
@@ -200,15 +194,92 @@ export function MessageItem({
             )}
           </div>
 
-          {!isMine ? renderToolbar(true, false) : null}
+          <div
+            ref={toolbarRef}
+            className={`absolute z-20 ${
+              isMine
+                ? "right-full top-1/2 mr-1.5 -translate-y-1/2"
+                : "left-full top-1/2 ml-1.5 -translate-y-1/2"
+            }`}
+          >
+            <MessageHoverToolbar
+              visible={toolbarVisible}
+              dotsOnEnd={!isMine}
+              moreActive={menuOpen}
+              onMore={() => {
+                setReactionOpen(false);
+                setMenuOpen((v) => !v);
+              }}
+              onReply={() => {
+                setMenuOpen(false);
+                setReactionOpen(false);
+                onReply();
+              }}
+              onReaction={() => {
+                setMenuOpen(false);
+                setReactionOpen((v) => !v);
+              }}
+            />
+            <MessageMoreMenu
+              open={menuOpen}
+              anchorRef={toolbarRef}
+              placement={menuPlacement}
+              locale={locale}
+              isMine={isMine}
+              isPinned={isPinned}
+              canRecall={isMine && !message.isRecalled && Boolean(onRecall)}
+              onClose={() => {
+                setMenuOpen(false);
+                clearHideToolbarTimer();
+                hideToolbarTimerRef.current = setTimeout(() => setHovered(false), 280);
+              }}
+              onEdit={onEdit}
+              onRecall={onRecall}
+              onForward={onForward ?? (() => undefined)}
+              onPin={onPin}
+              onUnpin={onUnpin}
+              onDeleteForMe={onDeleteForMe}
+            />
+            <MessageReactionPopover
+              open={reactionOpen}
+              anchorRef={toolbarRef}
+              placement={reactionPlacement}
+              activeType={myReaction}
+              onClose={() => {
+                setReactionOpen(false);
+                clearHideToolbarTimer();
+                hideToolbarTimerRef.current = setTimeout(() => setHovered(false), 280);
+              }}
+              onReact={handlePickReaction}
+            />
+          </div>
         </div>
 
-        {message.reactions.length > 0 && (
-          <div className="mt-0.5 flex gap-1" aria-label="Cảm xúc">
-            {message.reactions.map((r, i) => (
-              <span key={`${r.userId}-${i}`} className="rounded-full bg-white px-1.5 text-xs shadow">
-                {r.type}
-              </span>
+        {reactionGroups.length > 0 && (
+          <div className="mt-0.5 flex max-w-full flex-wrap gap-1" aria-label="Cảm xúc">
+            {reactionGroups.map(({ type, count, mine }) => (
+              <button
+                key={type}
+                type="button"
+                title={mine ? "Bấm để thu hồi cảm xúc" : undefined}
+                className={`inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-xs shadow-sm transition hover:brightness-95 ${
+                  mine
+                    ? "border-[var(--qc-primary)]/40 bg-[var(--qc-primary-light)]"
+                    : "border-[var(--qc-divider)] bg-white"
+                }`}
+                onClick={() => {
+                  if (mine) {
+                    onRemoveReaction?.();
+                  } else {
+                    onReact(type);
+                  }
+                }}
+              >
+                <span className="text-base leading-none" aria-hidden>
+                  {reactionEmoji(type)}
+                </span>
+                {count > 1 ? <span className="text-[10px] text-[var(--qc-text-secondary)]">{count}</span> : null}
+              </button>
             ))}
           </div>
         )}
@@ -222,7 +293,6 @@ export function MessageItem({
             </button>
           )}
         </div>
-
       </div>
     </div>
   );
