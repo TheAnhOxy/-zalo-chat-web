@@ -259,6 +259,7 @@ export function CallScreen({
             autoPlay
             playsInline
             muted
+            data-local="true"
             className={`h-full w-full object-cover ${videoOff ? "opacity-0" : ""}`}
           />
           {videoOff ? (
