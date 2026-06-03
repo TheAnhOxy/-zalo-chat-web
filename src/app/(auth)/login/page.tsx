@@ -1,13 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
-import { useEffect, useMemo, useState, Suspense } from "react";
+import { useEffect, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
-import { Eye, EyeOff, MessageCircle, ShieldCheck, Sparkles, Smartphone, Zap, KeyRound, ArrowRight, ShieldAlert } from "lucide-react";
+import { Smartphone, KeyRound, ArrowRight, ShieldAlert, User, Lock, Eye, EyeOff } from "lucide-react";
 import { FormError } from "@/src/components/ui/form-error";
 import { useToast } from "@/src/components/providers/toast-provider";
 import { useLogin } from "@/src/hooks/use-auth-actions";
@@ -17,6 +16,7 @@ import { loginSchema, requestPhoneOtpSchema } from "@/src/utils/validators/auth"
 import { authService } from "@/src/services/auth/auth.service";
 import { clearPendingLogin, getPendingLogin, setPendingLogin } from "@/src/utils/storage";
 import { LoginOption, PendingLoginState, AuthResponse } from "@/src/types/auth";
+import { AuthShell } from "@/src/components/ui/auth-shell";
 
 type LoginValues = z.infer<typeof loginSchema>;
 
@@ -56,14 +56,15 @@ function LoginInner() {
     }
     return null;
   })();
-  
+
   const [showPassword, setShowPassword] = useState(false);
   const [loginStage, setLoginStage] = useState<"form" | "options">("form");
   const [pendingLogin, setPendingLoginState] = useState<PendingLoginState | null>(null);
-  const [selectedOption, setSelectedOption] = useState<LoginOption>("quick");
+  const [selectedOption, setSelectedOption] = useState<LoginOption>("otp");
   const [optionLoading, setOptionLoading] = useState(false);
   const [otpPhone, setOtpPhone] = useState("");
   const [otpPhoneError, setOtpPhoneError] = useState<string | null>(null);
+  const [verificationMethod, setVerificationMethod] = useState<"phone" | "email">("phone");
 
   const form = useForm<LoginValues>({
     resolver: zodResolver(loginSchema),
@@ -72,6 +73,12 @@ function LoginInner() {
       password: "",
     },
   });
+
+  useEffect(() => {
+    if (auth.isAuthenticated) {
+      router.replace("/");
+    }
+  }, [auth.isAuthenticated, router]);
 
   useEffect(() => {
     const storedPending = getPendingLogin();
@@ -85,27 +92,6 @@ function LoginInner() {
 
     clearPendingLogin();
   }, [form]);
-
-  const introCards = useMemo(
-    () => [
-      {
-        icon: MessageCircle,
-        title: "Realtime Chat",
-        text: "Nhắn tin nhanh, mượt, không nhiễu",
-      },
-      {
-        icon: ShieldCheck,
-        title: "An toàn phiên",
-        text: "Giữ token và refresh an toàn",
-      },
-      {
-        icon: Zap,
-        title: "Tối ưu tốc độ",
-        text: "Giao diện nhẹ, phản hồi nhanh",
-      },
-    ],
-    []
-  );
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {
@@ -180,9 +166,31 @@ function LoginInner() {
 
     try {
       setOptionLoading(true);
-      // Calls request phone OTP with ONLY phone as required
       const otpSession = await authService.requestPhoneLoginOtp({ phone: parsedPhone.data.phone });
       showToast("Đã gửi mã OTP đăng nhập về email của tài khoản", "success");
+      router.push(`/verify-otp?mode=phone-login&sessionId=${otpSession.sessionId}`);
+    } catch (error) {
+      showToast(getErrorMessage(error), "error");
+    } finally {
+      setOptionLoading(false);
+    }
+  };
+
+  const handleEmailOtpRequest = async () => {
+    if (!pendingLogin) {
+      return;
+    }
+
+    const phone = pendingLogin.user.phone;
+    if (!phone) {
+      showToast("Tài khoản chưa được liên kết với số điện thoại để thực hiện gửi OTP", "error");
+      return;
+    }
+
+    try {
+      setOptionLoading(true);
+      const otpSession = await authService.requestPhoneLoginOtp({ phone });
+      showToast("Đã gửi mã OTP đăng nhập về email của bạn", "success");
       router.push(`/verify-otp?mode=phone-login&sessionId=${otpSession.sessionId}`);
     } catch (error) {
       showToast(getErrorMessage(error), "error");
@@ -195,218 +203,204 @@ function LoginInner() {
     clearPendingLogin();
     setPendingLoginState(null);
     setLoginStage("form");
-    setSelectedOption("quick");
+    setSelectedOption("otp");
+    setVerificationMethod("phone");
   };
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden p-4 md:p-8">
-      <Image src="/images/anhnen.jpg" alt="QuickChat background" fill priority className="-z-20 object-cover" />
-      <div className="absolute inset-0 -z-10 bg-slate-950/60" />
+    <AuthShell
+      subtitle={
+        loginStage === "form"
+          ? undefined
+          : "Đăng nhập thành công. Chọn cách tiếp tục vào ứng dụng."
+      }
+    >
+      {/* Alert message for session/device events */}
+      {alertMessage && (
+        <div className="mb-4 flex items-start gap-2.5 rounded-xl border border-rose-500/20 bg-rose-500/5 p-3.5 text-xs text-rose-600 animate-fadeIn">
+          <ShieldAlert className="size-4 shrink-0 text-rose-500 mt-0.5" />
+          <span className="leading-normal font-medium">{alertMessage}</span>
+        </div>
+      )}
 
-      <div className="grid w-full max-w-6xl gap-6 rounded-3xl border border-white/20 bg-white/10 p-4 shadow-2xl backdrop-blur-md md:grid-cols-[1.2fr_1fr] md:p-8">
-        <section className="order-2 rounded-2xl border border-white/30 bg-white/15 p-6 text-white shadow-xl backdrop-blur-xl md:order-2 md:p-8">
-          {loginStage === "form" ? (
-            <>
-              <h2 className="text-3xl font-bold">Đăng nhập</h2>
-              <p className="mt-2 text-sm text-white/80">Sử dụng Email/Số điện thoại và Mật khẩu</p>
-
-              {alertMessage && (
-                <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3.5 text-xs text-rose-200 animate-fadeIn">
-                  <ShieldAlert className="size-4 shrink-0 text-rose-400 mt-0.5" />
-                  <span className="leading-normal font-medium">{alertMessage}</span>
-                </div>
-              )}
-
-              <form onSubmit={onSubmit} className="mt-6 space-y-4">
-                <div>
-                  <label htmlFor="identifier" className="text-sm font-medium">
-                    Email hoặc số điện thoại
-                  </label>
-                  <input
-                    id="identifier"
-                    {...form.register("identifier")}
-                    className="mt-1 h-11 w-full rounded-lg border border-white/35 bg-white/95 px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                    placeholder="Nhập email hoặc số điện thoại"
-                  />
-                  <FormError message={form.formState.errors.identifier?.message} />
-                </div>
-
-                <div>
-                  <label htmlFor="password" className="text-sm font-medium">
-                    Mật khẩu
-                  </label>
-                  <div className="relative mt-1">
-                    <input
-                      id="password"
-                      type={showPassword ? "text" : "password"}
-                      {...form.register("password")}
-                      className="h-11 w-full rounded-lg border border-white/35 bg-white/95 px-3 pr-11 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                      placeholder="Nhập mật khẩu"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword((prev) => !prev)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-1 text-slate-600 transition hover:bg-slate-200"
-                    >
-                      {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-                    </button>
-                  </div>
-                  <FormError message={form.formState.errors.password?.message} />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loginMutation.isPending}
-                  className="h-11 w-full rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
-                >
-                  {loginMutation.isPending ? "Đang đăng nhập..." : "Đăng nhập"}
-                </button>
-
-                <div className="flex justify-between text-sm text-white/90">
-                  <Link href="/register" className="underline underline-offset-4">
-                    Đăng ký tài khoản
-                  </Link>
-                  <Link href="/forgot-password" className="underline underline-offset-4">
-                    Quên mật khẩu
-                  </Link>
-                </div>
-              </form>
-            </>
-          ) : (
-            <div className="space-y-5">
-              <div>
-                <h2 className="text-3xl font-bold">Chọn cách đăng nhập</h2>
-                <p className="mt-2 text-sm text-white/80">
-                  Đăng nhập thành công. Chọn 1 trong các lựa chọn để vào ứng dụng.
-                </p>
-              </div>
-
-              <div className="space-y-3">
-                <button
-                  type="button"
-                  onClick={finalizeQuickLogin}
-                  className={`flex w-full items-center justify-between rounded-2xl border px-4 py-4 text-left transition ${
-                    selectedOption === "quick"
-                      ? "border-cyan-300 bg-cyan-300/15"
-                      : "border-white/20 bg-white/10 hover:bg-white/15"
-                  }`}
-                  onMouseEnter={() => setSelectedOption("quick")}
-                >
-                  <div>
-                    <p className="font-semibold">Đăng nhập nhanh</p>
-                    <p className="text-xs text-white/75">Vào thẳng QuickChat bằng phiên hiện tại</p>
-                  </div>
-                  <ArrowRight className="size-4" />
-                </button>
-
-                <div
-                  className={`rounded-2xl border px-4 py-4 ${
-                    selectedOption === "otp"
-                      ? "border-cyan-300 bg-cyan-300/15"
-                      : "border-white/20 bg-white/10"
-                  }`}
-                >
-                  <button
-                    type="button"
-                    className="flex w-full items-center justify-between text-left"
-                    onClick={() => setSelectedOption("otp")}
-                  >
-                    <div>
-                      <p className="font-semibold">Xác thực OTP</p>
-                      <p className="text-xs text-white/75">Nhập số điện thoại để nhận OTP đăng nhập</p>
-                    </div>
-                    <Smartphone className="size-4" />
-                  </button>
-
-                  {selectedOption === "otp" ? (
-                    <div className="mt-4 space-y-3">
-                      <input
-                        value={otpPhone}
-                        onChange={(event) => {
-                          setOtpPhone(event.target.value);
-                          if (otpPhoneError) {
-                            setOtpPhoneError(null);
-                          }
-                        }}
-                        className="h-11 w-full rounded-lg border border-white/35 bg-white/95 px-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-                        placeholder="Nhập số điện thoại Việt Nam"
-                      />
-                      {otpPhoneError ? <FormError message={otpPhoneError} /> : null}
-                      <button
-                        type="button"
-                        onClick={handlePhoneOtpRequest}
-                        disabled={optionLoading}
-                        className="h-11 w-full rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-sm font-semibold text-white transition hover:brightness-110 disabled:opacity-60"
-                      >
-                        {optionLoading ? "Đang gửi OTP..." : "Nhận mã OTP qua Email"}
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setSelectedOption("2fa")}
-                  className="flex w-full items-center justify-between rounded-2xl border border-white/20 bg-white/10 px-4 py-4 text-left opacity-80"
-                >
-                  <div>
-                    <p className="font-semibold">Xác thực 2FA</p>
-                    <p className="text-xs text-white/75">Chưa triển khai ở backend hiện tại</p>
-                  </div>
-                  <KeyRound className="size-4" />
-                </button>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleBackToForm}
-                className="text-sm text-cyan-100 underline underline-offset-4"
-              >
-                Quay lại form đăng nhập
-              </button>
-            </div>
-          )}
-        </section>
-
-        <section className="order-1 relative overflow-hidden rounded-2xl border border-cyan-300/25 bg-[linear-gradient(160deg,#0d2a47,#133d5e,#1b5f7a)] p-7 text-white md:order-1 md:p-10">
-          <div className="pointer-events-none absolute -right-14 -top-14 size-48 rounded-full bg-cyan-300/20 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-16 -left-8 size-52 rounded-full bg-blue-400/20 blur-3xl" />
-
-          <p className="inline-flex items-center gap-2 rounded-full border border-cyan-100/40 bg-white/10 px-3 py-1 text-xs uppercase tracking-[0.2em] text-cyan-100">
-            QuickChat
-            <Sparkles className="size-3 animate-pulse" />
-          </p>
-
-          <h1 className="mt-6 text-4xl font-extrabold leading-tight md:text-5xl">
-            Kết nối nhóm
-            <br />
-            Nhanh và bảo mật
-          </h1>
-
-          <p className="mt-4 max-w-md text-base text-cyan-50/90 md:text-lg">
-            Không gian trò chuyện realtime cho đội của bạn với trải nghiệm mượt, rõ và hiện đại.
-          </p>
-
-          <div className="mt-8 grid gap-3 sm:grid-cols-3">
-            {introCards.map((card, index) => {
-              const Icon = card.icon;
-
-              return (
-                <div
-                  key={card.title}
-                  className="animate-fadeIn rounded-xl border border-white/15 bg-white/10 p-3"
-                  style={{ animationDelay: `${index * 120}ms` }}
-                >
-                  <Icon className="size-5 text-cyan-200" />
-                  <p className="mt-2 text-sm font-medium">{card.title}</p>
-                  <p className="mt-1 text-xs text-cyan-50/75">{card.text}</p>
-                </div>
-              );
-            })}
+      {loginStage === "form" ? (
+        <>
+          {/* Welcome section */}
+          <div className="auth-welcome">
+            <h2 className="auth-welcome-title">Đăng nhập</h2>
+            <p className="auth-welcome-desc">
+              Chào mừng bạn đến với QuickChat — nơi kết nối và trò chuyện cùng bạn bè!
+            </p>
           </div>
-        </section>
-      </div>
-    </div>
+
+          <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+            {/* Identifier field */}
+            <div className="auth-input-group" style={{ marginBottom: 0 }}>
+              <label htmlFor="identifier" className="auth-input-label">
+                Số điện thoại hoặc Email
+              </label>
+              <div className="auth-input-wrapper">
+                <span className="auth-input-icon">
+                  <User className="size-4" />
+                </span>
+                <input
+                  id="identifier"
+                  {...form.register("identifier")}
+                  className="auth-input"
+                  placeholder="Nhập SĐT hoặc email"
+                />
+              </div>
+              <FormError message={form.formState.errors.identifier?.message} />
+            </div>
+
+            {/* Password field */}
+            <div className="auth-input-group" style={{ marginBottom: 0 }}>
+              <div className="auth-label-row">
+                <label htmlFor="password" className="auth-input-label" style={{ marginBottom: 0 }}>
+                  Mật khẩu
+                </label>
+                <Link href="/forgot-password" className="auth-forgot-link">
+                  Quên mật khẩu?
+                </Link>
+              </div>
+              <div className="auth-input-wrapper">
+                <span className="auth-input-icon">
+                  <Lock className="size-4" />
+                </span>
+                <input
+                  id="password"
+                  type={showPassword ? "text" : "password"}
+                  {...form.register("password")}
+                  className="auth-input auth-input-password"
+                  placeholder="Nhập mật khẩu"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="auth-eye-btn"
+                >
+                  {showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              </div>
+              <FormError message={form.formState.errors.password?.message} />
+            </div>
+
+            {/* Submit */}
+            <button
+              type="submit"
+              disabled={loginMutation.isPending}
+              className="auth-btn-primary"
+              style={{ marginTop: "0.5rem" }}
+            >
+              {loginMutation.isPending ? "Đang đăng nhập..." : "Đăng nhập"}
+            </button>
+
+            {/* Register link */}
+            <div style={{ textAlign: "center", paddingTop: "0.25rem" }}>
+              <span className="auth-text-muted">Chưa có tài khoản? </span>
+              <Link href="/register" className="auth-link">
+                Đăng ký ngay
+              </Link>
+            </div>
+          </form>
+        </>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: "1.25rem" }}>
+          {/* Option Toggle / Tabs */}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setVerificationMethod("phone")}
+              className={`flex-1 py-2 px-3 text-xs font-semibold rounded-xl border transition-all ${
+                verificationMethod === "phone"
+                  ? "border-emerald-500 bg-emerald-50/70 text-emerald-800 shadow-sm"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              Số điện thoại
+            </button>
+            <button
+              type="button"
+              onClick={() => setVerificationMethod("email")}
+              className={`flex-1 py-2 px-3 text-xs font-semibold rounded-xl border transition-all ${
+                verificationMethod === "email"
+                  ? "border-emerald-500 bg-emerald-50/70 text-emerald-800 shadow-sm"
+                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              Gmail / Email
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-emerald-500 bg-emerald-50/50 p-4 text-emerald-950">
+            {verificationMethod === "phone" ? (
+              <div className="space-y-3">
+                <div className="flex w-full items-center justify-between text-left mb-3">
+                  <div>
+                    <p className="font-semibold text-sm">Xác thực qua Số điện thoại</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Nhập số điện thoại của bạn để nhận mã OTP</p>
+                  </div>
+                  <Smartphone className="size-4 text-emerald-600" />
+                </div>
+                <input
+                  value={otpPhone}
+                  onChange={(event) => {
+                    setOtpPhone(event.target.value);
+                    if (otpPhoneError) {
+                      setOtpPhoneError(null);
+                    }
+                  }}
+                  className="auth-input"
+                  style={{ paddingLeft: "0.875rem" }}
+                  placeholder="Nhập số điện thoại"
+                />
+                {otpPhoneError ? <FormError message={otpPhoneError} /> : null}
+                <button
+                  type="button"
+                  onClick={handlePhoneOtpRequest}
+                  disabled={optionLoading}
+                  className="auth-btn-primary"
+                  style={{ height: "2.75rem", fontSize: "0.875rem" }}
+                >
+                  {optionLoading ? "Đang gửi OTP..." : "Nhận mã OTP qua Email"}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex w-full items-center justify-between text-left mb-3">
+                  <div>
+                    <p className="font-semibold text-sm">Xác thực qua Gmail</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Mã OTP sẽ được gửi về hòm thư của tài khoản</p>
+                  </div>
+                  <KeyRound className="size-4 text-emerald-600" />
+                </div>
+                <div className="rounded-xl border border-dashed border-emerald-300 bg-emerald-50/30 p-3 text-center my-2">
+                  <span className="text-xs text-slate-500 font-medium">Email đăng ký tài khoản:</span>
+                  <p className="text-sm font-semibold text-emerald-800 mt-1">{maskEmail(pendingLogin?.user?.email)}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleEmailOtpRequest}
+                  disabled={optionLoading}
+                  className="auth-btn-primary"
+                  style={{ height: "2.75rem", fontSize: "0.875rem" }}
+                >
+                  {optionLoading ? "Đang gửi OTP..." : "Nhận mã OTP về Gmail"}
+                </button>
+              </div>
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={handleBackToForm}
+            className="auth-btn-secondary"
+          >
+            Quay lại form đăng nhập
+          </button>
+        </div>
+      )}
+    </AuthShell>
   );
 }
 
@@ -414,10 +408,10 @@ export default function LoginPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex min-h-screen items-center justify-center bg-slate-950 text-white">
+        <div className="flex min-h-screen items-center justify-center bg-slate-50 text-emerald-600">
           <div className="text-center space-y-4">
-            <div className="h-10 w-10 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin mx-auto" />
-            <p className="text-sm text-white/60">Đang tải...</p>
+            <div className="h-10 w-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto" />
+            <p className="text-sm text-slate-500">Đang tải...</p>
           </div>
         </div>
       }
@@ -425,4 +419,15 @@ export default function LoginPage() {
       <LoginInner />
     </Suspense>
   );
+}
+
+function maskEmail(email?: string): string {
+  if (!email) return "";
+  const parts = email.split("@");
+  if (parts.length !== 2) return email;
+  const [local, domain] = parts;
+  if (local.length <= 3) {
+    return `${local.substring(0, 1)}***@${domain}`;
+  }
+  return `${local.substring(0, 3)}***@${domain}`;
 }
