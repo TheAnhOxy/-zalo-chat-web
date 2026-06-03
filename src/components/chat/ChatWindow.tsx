@@ -32,6 +32,9 @@ import {
   getConversationDisplayName,
 } from "@/src/lib/conversation-display";
 import { profileCacheForUser, usePeerProfile } from "@/src/hooks/usePeerProfile";
+import { useGroupMemberProfiles } from "@/src/hooks/useGroupMemberProfiles";
+import { ComposerActionsSheet } from "@/src/components/chat/ComposerActionsSheet";
+import { AiChatSheet } from "@/src/components/ai/AiChatSheet";
 
 interface ChatWindowProps {
   conversationId: string;
@@ -57,8 +60,11 @@ export function ChatWindow({
   const bg = useConversationBackground(conversationId, conversation ?? null);
 
   const [optionsFocusWallpaper, setOptionsFocusWallpaper] = useState(false);
+  const [optionsFocusPinned, setOptionsFocusPinned] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [showComposerActions, setShowComposerActions] = useState(false);
+  const [showAiSheet, setShowAiSheet] = useState(false);
   const [jumpToMessageId, setJumpToMessageId] = useState<string | null>(null);
   const [showForwardModal, setShowForwardModal] = useState(false);
   const [forwardMessageIds, setForwardMessageIds] = useState<string[]>([]);
@@ -104,9 +110,27 @@ export function ChatWindow({
   );
 
   const isGroup = conversation?.type === "GROUP";
+  const memberIds = useMemo(
+    () => conversation?.participants.map((p) => p.userId) ?? [],
+    [conversation?.participants]
+  );
+  const { profiles: memberProfiles } = useGroupMemberProfiles(isGroup ? memberIds : []);
   const otherId = other?.userId;
   const { data: peerUser } = usePeerProfile(otherId, Boolean(conversation && !isGroup));
   const peerProfiles = profileCacheForUser(otherId, peerUser);
+
+  const participantsForList = useMemo(() => {
+    if (!conversation?.participants) return undefined;
+    if (!isGroup) return conversation.participants;
+    return conversation.participants.map((p) => ({
+      ...p,
+      fullName:
+        memberProfiles[p.userId]?.fullName?.trim() ||
+        p.fullName?.trim() ||
+        `User ${p.userId.slice(-4).toUpperCase()}`,
+      avatar: memberProfiles[p.userId]?.avatar || p.avatar,
+    }));
+  }, [conversation?.participants, isGroup, memberProfiles]);
 
   const title =
     conversation && userId
@@ -155,7 +179,20 @@ export function ChatWindow({
 
   const handleReact = useCallback(
     (messageId: string, type: ReactionType) => {
-      socket.current?.addReaction(messageId, type, conversationId);
+      const msg = messages.find((m) => m._id === messageId);
+      const mine = msg?.reactions.find((r) => r.userId === userId);
+      if (mine?.type === type) {
+        socket.current?.removeReaction(messageId, conversationId);
+      } else {
+        socket.current?.addReaction(messageId, type, conversationId);
+      }
+    },
+    [socket, conversationId, messages, userId]
+  );
+
+  const handleRemoveReaction = useCallback(
+    (messageId: string) => {
+      socket.current?.removeReaction(messageId, conversationId);
     },
     [socket, conversationId]
   );
@@ -304,7 +341,7 @@ export function ChatWindow({
   }
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
       <ChatHeader
         title={title}
         avatarName={title}
@@ -314,12 +351,22 @@ export function ChatWindow({
         participant={other ?? undefined}
         presence={presence}
         locale={locale}
-        showWallpaper={false}
+        showWallpaper={!isGroup}
         showCalls={true}
         callHref={`/call/${conversationId}`}
         onSearchToggle={() => setShowSearch((v) => !v)}
+        onAppearance={
+          !isGroup
+            ? () => {
+                setOptionsFocusWallpaper(true);
+                setOptionsFocusPinned(false);
+                setShowOptions(true);
+              }
+            : undefined
+        }
         onInfo={() => {
           setOptionsFocusWallpaper(false);
+          setOptionsFocusPinned(false);
           setShowOptions(true);
         }}
       />
@@ -340,7 +387,7 @@ export function ChatWindow({
           messages={messages}
           calls={calls}
           currentUserId={userId!}
-          participants={conversation?.participants}
+          participants={participantsForList}
           pinnedMessages={conversation?.pinnedMessages}
           locale={locale}
           hasMore={hasMore}
@@ -354,13 +401,27 @@ export function ChatWindow({
           onForward={handleForwardOne}
           allowEdit={!isGroup}
           onReact={handleReact}
+          onRemoveReaction={handleRemoveReaction}
           onRetry={retryFailed}
           onPin={handlePin}
           onUnpin={handleUnpin}
+          onViewAllPinned={() => {
+            setOptionsFocusPinned(true);
+            setOptionsFocusWallpaper(false);
+            setShowOptions(true);
+          }}
         />
 
         <TypingIndicator
-          names={othersTyping.map(() => (isGroup ? "Ai đó" : other?.fullName || "Người dùng"))}
+          names={othersTyping.map((id) => {
+            if (!isGroup) return other?.fullName?.trim() || "Người dùng";
+            const p = conversation?.participants.find((x) => x.userId === id);
+            return (
+              memberProfiles[id]?.fullName?.trim() ||
+              p?.fullName?.trim() ||
+              "Ai đó"
+            );
+          })}
           locale={locale}
         />
       </div>
@@ -379,7 +440,25 @@ export function ChatWindow({
         onCancelReply={() => setUi({ replyToId: null })}
         onCancelEdit={() => setUi({ editingId: null })}
         onVoiceRecorded={handleVoiceRecorded}
+        onOpenActions={() => setShowComposerActions(true)}
       />
+
+      <ComposerActionsSheet
+        open={showComposerActions}
+        onClose={() => setShowComposerActions(false)}
+        onOpenAi={() => setShowAiSheet(true)}
+        onFilesSelected={handleFiles}
+      />
+
+      {userId ? (
+        <AiChatSheet
+          open={showAiSheet}
+          onClose={() => setShowAiSheet(false)}
+          userId={userId}
+          targetConversationId={conversationId}
+          autoSummarizeOnOpen
+        />
+      ) : null}
 
       {conversation && userId && (
         <ChatOptionsPanel
@@ -409,6 +488,7 @@ export function ChatWindow({
           }}
           onLeftGroup={onConversationLeft}
           openWallpaperSection={optionsFocusWallpaper}
+          openPinnedSection={optionsFocusPinned}
         />
       )}
 

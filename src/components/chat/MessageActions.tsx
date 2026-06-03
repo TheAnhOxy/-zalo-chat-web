@@ -2,6 +2,7 @@
 
 import { ReactionType } from "@/src/types/message";
 import { t, ChatLocale } from "@/src/lib/i18n/chat";
+import { reactionEmoji } from "@/src/lib/reactions";
 
 const REACTIONS: ReactionType[] = ["LIKE", "LOVE", "HAHA", "WOW", "SAD", "ANGRY"];
 
@@ -70,14 +71,3 @@ function ActionButton({ label, onClick }: { label: string; onClick: () => void }
   );
 }
 
-function reactionEmoji(type: ReactionType): string {
-  const map: Record<ReactionType, string> = {
-    LIKE: "👍",
-    LOVE: "❤️",
-    HAHA: "😂",
-    WOW: "😮",
-    SAD: "😢",
-    ANGRY: "😠",
-  };
-  return map[type];
-}

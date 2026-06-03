@@ -167,6 +167,10 @@ export function ChatListPanel({
     socketService.on("conversation_history_cleared", handleListEvent);
     socketService.on("message_seen", handleListEvent);
     socketService.on("conversation_call_updated", handleListEvent);
+    socketService.on("conversation_created", handleListEvent);
+    socketService.on("conversation_updated", handleListEvent);
+    socketService.on("conversation_removed", handleListEvent);
+    socketService.on("new_message", handleListEvent);
 
     return () => {
       socketService.off("user_status_changed", handleStatus);
@@ -174,6 +178,10 @@ export function ChatListPanel({
       socketService.off("conversation_history_cleared", handleListEvent);
       socketService.off("message_seen", handleListEvent);
       socketService.off("conversation_call_updated", handleListEvent);
+      socketService.off("conversation_created", handleListEvent);
+      socketService.off("conversation_updated", handleListEvent);
+      socketService.off("conversation_removed", handleListEvent);
+      socketService.off("new_message", handleListEvent);
     };
   }, [queryClient, userId]);
 

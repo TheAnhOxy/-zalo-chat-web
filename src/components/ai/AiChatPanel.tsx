@@ -34,13 +34,17 @@ type AiChatPanelProps = {
   userId: string;
   targetConversationId?: string | null;
   autoSummarizeOnOpen?: boolean;
+  /** `page` = /ai (có bottom nav); `sheet` = bottom sheet từ chat */
+  layout?: "page" | "sheet";
 };
 
 export function AiChatPanel({
   userId,
   targetConversationId,
   autoSummarizeOnOpen,
+  layout = "page",
 }: AiChatPanelProps) {
+  const isSheet = layout === "sheet";
   const [input, setInput] = useState("");
   const [showConversations, setShowConversations] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -64,58 +68,69 @@ export function AiChatPanel({
   };
 
   return (
-    <div className="flex h-full flex-col bg-[var(--qc-bg)]">
+    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[var(--qc-bg)]">
       {/* Header */}
-      <header className="flex shrink-0 items-center gap-3 border-b border-[var(--qc-divider)] bg-white px-4 py-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--qc-primary-dark)] to-[var(--qc-primary)] text-white">
-          <Sparkles size={18} />
+      <header className="flex shrink-0 items-center gap-2 border-b border-[var(--qc-divider)] bg-white px-2 py-2 sm:gap-3 sm:px-4 sm:py-3">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--qc-primary-dark)] to-[var(--qc-primary)] text-white sm:h-9 sm:w-9">
+          <Sparkles size={16} className="sm:h-[18px] sm:w-[18px]" />
         </div>
         <div className="min-w-0 flex-1">
-          <h1 className="text-sm font-bold text-[var(--qc-text-primary)]">Trợ lý AI</h1>
-          <p className="text-xs text-[var(--qc-primary)]">Powered by QuickChat AI</p>
+          <h1 className="truncate text-[15px] font-bold text-[var(--qc-text-primary)] sm:text-sm">
+            Trợ lý AI
+          </h1>
+          <p className="hidden truncate text-xs text-[var(--qc-primary)] sm:block">
+            Powered by QuickChat AI
+          </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void openConversations()}
-          className="rounded-lg p-2 text-[var(--qc-text-secondary)] transition hover:bg-[var(--qc-primary-light)] hover:text-[var(--qc-primary)]"
-          title="Danh sách cuộc trò chuyện"
-        >
-          <MessagesSquare size={20} />
-        </button>
-        <button
-          type="button"
-          onClick={() => void bot.newConversation()}
-          className="rounded-lg p-2 text-[var(--qc-text-secondary)] transition hover:bg-[var(--qc-primary-light)] hover:text-[var(--qc-primary)]"
-          title="Cuộc trò chuyện mới"
-        >
-          <MessageSquarePlus size={20} />
-        </button>
-        <button
-          type="button"
-          onClick={() => void bot.deleteCurrentConversation()}
-          className="rounded-lg p-2 text-[var(--qc-text-secondary)] transition hover:bg-rose-50 hover:text-rose-600"
-          title="Xóa cuộc trò chuyện"
-        >
-          <Trash2 size={20} />
-        </button>
+        <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
+          <button
+            type="button"
+            onClick={() => void openConversations()}
+            className="rounded-lg p-2 text-[var(--qc-text-secondary)] transition hover:bg-[var(--qc-primary-light)] hover:text-[var(--qc-primary)]"
+            title="Danh sách cuộc trò chuyện"
+            aria-label="Danh sách cuộc trò chuyện"
+          >
+            <MessagesSquare size={20} />
+          </button>
+          <button
+            type="button"
+            onClick={() => void bot.newConversation()}
+            className="rounded-lg p-2 text-[var(--qc-text-secondary)] transition hover:bg-[var(--qc-primary-light)] hover:text-[var(--qc-primary)]"
+            title="Cuộc trò chuyện mới"
+            aria-label="Cuộc trò chuyện mới"
+          >
+            <MessageSquarePlus size={20} />
+          </button>
+          <button
+            type="button"
+            onClick={() => void bot.deleteCurrentConversation()}
+            className="rounded-lg p-2 text-[var(--qc-text-secondary)] transition hover:bg-rose-50 hover:text-rose-600"
+            title="Xóa cuộc trò chuyện"
+            aria-label="Xóa cuộc trò chuyện"
+          >
+            <Trash2 size={20} />
+          </button>
+        </div>
       </header>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4">
-        {bot.messages.map((msg) => (
-          <MessageBubble
-            key={msg.id}
-            message={msg}
-            onRecall={() => void bot.recallMessage(msg.id)}
-          />
-        ))}
-        <div ref={bot.listEndRef} />
+      <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <div className="mx-auto w-full max-w-3xl px-3 py-3 sm:px-4 sm:py-4">
+          {bot.messages.map((msg) => (
+            <MessageBubble
+              key={msg.id}
+              message={msg}
+              onRecall={() => void bot.recallMessage(msg.id)}
+            />
+          ))}
+          <div ref={bot.listEndRef} />
+        </div>
       </div>
 
       {/* Quick replies */}
       {bot.showQuickReplies ? (
-        <div className="shrink-0 border-t border-[var(--qc-divider)] bg-white px-3 py-2">
-          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+        <div className="shrink-0 border-t border-[var(--qc-divider)] bg-white px-2 py-2 sm:px-3">
+          <div className="mx-auto flex max-w-3xl gap-2 overflow-x-auto pb-1 scrollbar-hide">
             {bot.quickReplies.map((q) => (
               <button
                 key={q}
@@ -133,14 +148,19 @@ export function AiChatPanel({
       {/* Composer */}
       <form
         onSubmit={handleSubmit}
-        className="shrink-0 border-t border-[var(--qc-divider)] bg-white px-3 py-3 shadow-[0_-2px_8px_rgba(0,0,0,0.04)]"
+        className={`shrink-0 border-t border-[var(--qc-divider)] bg-white shadow-[0_-2px_8px_rgba(0,0,0,0.04)] ${
+          isSheet
+            ? "px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:px-3 sm:py-3"
+            : "px-2 py-2 sm:px-3 sm:py-3"
+        }`}
       >
+        <div className="mx-auto w-full max-w-3xl">
         {bot.selectedFiles.length > 0 ? (
           <div className="mb-2 flex flex-wrap gap-2">
             {bot.selectedFiles.map((f, i) => (
               <span
                 key={`${f.name}-${i}`}
-                className="inline-flex max-w-[200px] items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-700"
+                className="inline-flex max-w-[min(200px,70vw)] items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-700"
               >
                 <span className="truncate">{f.name}</span>
                 <button
@@ -156,7 +176,7 @@ export function AiChatPanel({
           </div>
         ) : null}
 
-        <div className="flex items-end gap-2">
+        <div className="flex min-w-0 items-end gap-1.5 sm:gap-2">
           <input
             ref={fileInputRef}
             type="file"
@@ -193,12 +213,12 @@ export function AiChatPanel({
             rows={1}
             placeholder="Hỏi trợ lý AI..."
             disabled={bot.isSending}
-            className="max-h-28 min-h-[44px] flex-1 resize-none rounded-3xl bg-[var(--qc-bg)] px-4 py-2.5 text-sm text-[var(--qc-text-primary)] outline-none placeholder:text-[var(--qc-text-secondary)] focus:ring-2 focus:ring-[var(--qc-primary)]/25"
+            className="max-h-28 min-h-[40px] min-w-0 flex-1 resize-none rounded-3xl bg-[var(--qc-bg)] px-3 py-2 text-sm text-[var(--qc-text-primary)] outline-none placeholder:text-[var(--qc-text-secondary)] focus:ring-2 focus:ring-[var(--qc-primary)]/25 sm:min-h-[44px] sm:px-4 sm:py-2.5"
           />
           <button
             type="submit"
             disabled={bot.isSending || (!input.trim() && bot.selectedFiles.length === 0)}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[var(--qc-primary-dark)] to-[var(--qc-primary)] text-white transition hover:brightness-110 disabled:opacity-50"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[var(--qc-primary-dark)] to-[var(--qc-primary)] text-white transition hover:brightness-110 disabled:opacity-50 sm:h-11 sm:w-11"
           >
             {bot.isSending ? (
               <Loader2 size={20} className="animate-spin" />
@@ -207,20 +227,21 @@ export function AiChatPanel({
             )}
           </button>
         </div>
+        </div>
       </form>
 
       {/* Conversations drawer */}
       {showConversations ? (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/30">
+        <div className="fixed inset-0 z-[90] flex justify-end bg-black/30">
           <div
             className="absolute inset-0"
             onClick={() => setShowConversations(false)}
             aria-hidden
           />
-          <aside className="relative flex h-full w-full max-w-sm flex-col bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-[var(--qc-divider)] px-4 py-3">
-              <h2 className="font-bold text-slate-800">Cuộc trò chuyện</h2>
-              <div className="flex gap-1">
+          <aside className="relative flex h-[100dvh] w-full max-w-full flex-col bg-white shadow-2xl sm:max-w-sm">
+            <div className="flex items-center justify-between border-b border-[var(--qc-divider)] px-3 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] sm:px-4 sm:pt-3">
+              <h2 className="truncate text-base font-bold text-slate-800 sm:text-lg">Cuộc trò chuyện</h2>
+              <div className="flex shrink-0 gap-1">
                 <button
                   type="button"
                   onClick={() => {
@@ -240,7 +261,7 @@ export function AiChatPanel({
                 </button>
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto">
+            <div className="min-h-0 flex-1 overflow-y-auto pb-[env(safe-area-inset-bottom)]">
               {bot.loadingConversations ? (
                 <p className="py-8 text-center text-sm text-slate-500">Đang tải...</p>
               ) : bot.conversations.length === 0 ? (
@@ -326,7 +347,7 @@ function MessageBubble({
           <Sparkles size={14} />
         </div>
       )}
-      <div className={`max-w-[78%] ${isUser ? "items-end" : "items-start"} flex flex-col`}>
+      <div className={`max-w-[min(88vw,78%)] sm:max-w-[78%] ${isUser ? "items-end" : "items-start"} flex min-w-0 flex-col`}>
         <div
           className={`relative rounded-2xl px-3.5 py-2.5 shadow-sm ${
             isUser
@@ -347,7 +368,7 @@ function MessageBubble({
           ) : (
             <>
               {message.content ? (
-                <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
+                <p className="break-words whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
               ) : null}
               {message.attachments?.map((a) => (
                 <a

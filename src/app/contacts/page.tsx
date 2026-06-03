@@ -17,7 +17,7 @@ import {
   Check,
   Settings,
 } from "lucide-react";
-import { AppNavSidebar } from "@/src/components/layout/app-nav-sidebar";
+import { ContactsMainShell } from "@/src/components/layout/contacts-shell";
 import Image from "next/image";
 import Link from "next/link";
 
@@ -160,18 +160,18 @@ export default function ContactsPage() {
   };
 
   return (
-    <main className="h-screen overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-amber-50 text-slate-800">
+    <>
       <Suspense fallback={null}>
         <ContactsUserQueryRedirect />
       </Suspense>
-      <div className="h-full w-full md:grid md:grid-cols-[72px_330px_1fr]">
-
-        <AppNavSidebar activeTab="contacts" />
-
-        {/* ── Contacts Sidebar ── */}
-        <section className="flex flex-col border-r border-slate-200 bg-slate-50 h-full overflow-hidden">
+      <ContactsMainShell
+        list={
+        <section className="flex h-full min-h-0 w-full flex-col overflow-hidden border-r border-slate-200 bg-slate-50">
+          <div className="shrink-0 border-b border-slate-200 bg-white px-4 py-3 md:hidden">
+            <h1 className="text-center text-[17px] font-semibold text-slate-800">Danh bạ</h1>
+          </div>
           {/* Search + Add */}
-          <div className="border-b border-slate-200 px-4 py-3 shrink-0">
+          <div className="shrink-0 border-b border-slate-200 px-3 py-2.5 sm:px-4 sm:py-3">
             <div className="flex items-center gap-2">
               <div className="flex flex-1 items-center gap-2 rounded-xl bg-slate-200/70 px-3 py-2">
                 <Search size={16} className="text-slate-500 shrink-0" />
@@ -307,7 +307,7 @@ export default function ContactsPage() {
                                 (friend.fullName || "U").charAt(0).toUpperCase()
                               )}
                             </div>
-                            <div className="flex-1 overflow-hidden">
+                            <div className="min-w-0 flex-1">
                               <p className="truncate text-sm font-medium text-slate-800">
                                 {friend.fullName}
                               </p>
@@ -418,7 +418,7 @@ export default function ContactsPage() {
                               <Users size={20} />
                             )}
                           </div>
-                          <div className="flex-1 overflow-hidden">
+                          <div className="min-w-0 flex-1">
                             <p className="truncate text-sm font-semibold text-slate-800">
                               {group.name}
                             </p>
@@ -456,26 +456,12 @@ export default function ContactsPage() {
             )}
           </div>
         </section>
+        }
+      />
 
-        {/* ── Main content placeholder ── */}
-        <section className="hidden flex-col bg-white md:flex">
-          <div className="flex h-full flex-col items-center justify-center text-center px-6">
-            <div className="mb-4 flex h-24 w-24 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
-              <Users size={48} />
-            </div>
-            <h2 className="text-xl font-semibold text-slate-800">Danh bạ QuickChat</h2>
-            <p className="mt-2 max-w-md text-sm text-slate-500">
-              Chọn một liên hệ từ danh sách bên trái để xem thông tin chi tiết hoặc bắt đầu cuộc trò chuyện mới.
-            </p>
-          </div>
-        </section>
-
-      </div>
-
-      {/* Click outside để đóng sort menu */}
       {showSortMenu && (
         <div className="fixed inset-0 z-20" onClick={() => setShowSortMenu(false)} />
       )}
-    </main>
+    </>
   );
 }

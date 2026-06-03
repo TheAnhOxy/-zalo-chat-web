@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import { useRouter } from "next/navigation";
 import { authService } from "@/src/services/auth/auth.service";
 import { socketService } from "@/src/services/socket/socket.service";
+import { useConversationsRealtimeSync } from "@/src/hooks/useConversationsRealtimeSync";
 import { AuthResponse, AuthUser } from "@/src/types/auth";
 import {
   clearStoredTokens,
@@ -51,6 +52,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       socketService.disconnect();
     };
   }, [user]);
+
+  useConversationsRealtimeSync(user?._id);
 
   const loginWithAuthResponse = useCallback((payload: AuthResponse) => {
     setStoredTokens({

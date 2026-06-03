@@ -11,6 +11,7 @@ export const SOCKET_CLIENT = {
   recallMessage: "recall_message",
   deleteMessageMe: "delete_message_me",
   addReaction: "add_reaction",
+  removeReaction: "remove_reaction",
   typing: "typing",
   stopTyping: "stop_typing",
   seenConversation: "seen_conversation",

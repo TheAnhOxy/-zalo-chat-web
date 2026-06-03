@@ -223,6 +223,14 @@ export class ChatSocket {
     });
   }
 
+  removeReaction(messageId: string, conversationId: string) {
+    socketService.emit(SOCKET_CLIENT.removeReaction, {
+      messageId,
+      userId: this.userId,
+      conversationId,
+    });
+  }
+
   pinMessage(messageId: string, conversationId: string) {
     socketService.emit(SOCKET_CLIENT.pinMessage, { messageId, conversationId, userId: this.userId });
   }

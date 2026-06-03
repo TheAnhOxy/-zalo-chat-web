@@ -2,12 +2,14 @@
 
 import { useEffect, useRef } from "react";
 import { t, ChatLocale } from "@/src/lib/i18n/chat";
+import { AnchorPortal } from "@/src/components/chat/AnchorPortal";
+import { AnchorPlacement } from "@/src/hooks/useAnchorPosition";
 
 /** Menu ⋮ — khớp mobile chat_detail_screen / group_chat_screen */
 export interface MessageMoreMenuProps {
   open: boolean;
   anchorRef: React.RefObject<HTMLElement | null>;
-  align?: "left" | "right";
+  placement?: AnchorPlacement;
   locale?: ChatLocale;
   isMine: boolean;
   isPinned?: boolean;
@@ -24,7 +26,7 @@ export interface MessageMoreMenuProps {
 export function MessageMoreMenu({
   open,
   anchorRef,
-  align = "left",
+  placement = "bottom-start",
   locale = "vi",
   isMine,
   isPinned = false,
@@ -57,39 +59,37 @@ export function MessageMoreMenu({
     };
   }, [open, onClose, anchorRef]);
 
-  if (!open) return null;
-
   const run = (fn: () => void) => {
     onClose();
     fn();
   };
 
   return (
-    <div
-      ref={menuRef}
-      className={`absolute top-full z-50 mt-1 min-w-[172px] rounded-md bg-white py-1 shadow-[0_4px_20px_rgba(0,0,0,0.12)] ${
-        align === "right" ? "right-0" : "left-0"
-      }`}
-      role="menu"
-    >
-      {isMine && onEdit ? (
-        <MenuItem label={t("edit", locale)} onClick={() => run(onEdit)} />
-      ) : null}
-      {isMine && canRecall && onRecall ? (
-        <MenuItem label={t("recall", locale)} onClick={() => run(onRecall)} danger />
-      ) : null}
-      {isPinned && onUnpin ? (
-        <MenuItem label={t("unpin", locale)} onClick={() => run(onUnpin)} />
-      ) : !isPinned && onPin ? (
-        <MenuItem label={t("pin", locale)} onClick={() => run(onPin)} />
-      ) : null}
-      <MenuItem label={t("forward", locale)} onClick={() => run(onForward)} />
-      <MenuItem
-        label={t("deleteForMe", locale)}
-        onClick={() => run(onDeleteForMe)}
-        danger
-      />
-    </div>
+    <AnchorPortal open={open} anchorRef={anchorRef} placement={placement} offset={4}>
+      <div
+        ref={menuRef}
+        className="min-w-[172px] rounded-md bg-white py-1 shadow-[0_4px_20px_rgba(0,0,0,0.12)]"
+        role="menu"
+      >
+        {isMine && onEdit ? (
+          <MenuItem label={t("edit", locale)} onClick={() => run(onEdit)} />
+        ) : null}
+        {isMine && canRecall && onRecall ? (
+          <MenuItem label={t("recall", locale)} onClick={() => run(onRecall)} danger />
+        ) : null}
+        {isPinned && onUnpin ? (
+          <MenuItem label={t("unpin", locale)} onClick={() => run(onUnpin)} />
+        ) : !isPinned && onPin ? (
+          <MenuItem label={t("pin", locale)} onClick={() => run(onPin)} />
+        ) : null}
+        <MenuItem label={t("forward", locale)} onClick={() => run(onForward)} />
+        <MenuItem
+          label={t("deleteForMe", locale)}
+          onClick={() => run(onDeleteForMe)}
+          danger
+        />
+      </div>
+    </AnchorPortal>
   );
 }
 

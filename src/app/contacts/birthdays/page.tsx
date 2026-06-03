@@ -5,10 +5,11 @@ import { useRouter } from "next/navigation";
 import { useAuthGuard } from "@/src/hooks/use-auth-guard";
 import { useFriends } from "@/src/hooks/use-contacts";
 import { PageLoader } from "@/src/components/ui/page-state";
-import { ArrowLeft, Cake, Calendar, MessageSquare, Settings } from "lucide-react";
+import { Cake, Calendar, MessageSquare, Settings } from "lucide-react";
 import Image from "next/image";
 import { contactsService } from "@/src/services/contacts/contacts.service";
-import { useToast } from "@/src/components/providers/toast-provider";
+import { ContactsShell } from "@/src/components/layout/contacts-shell";
+import { ContactsSubpageHeader } from "@/src/components/layout/contacts-subpage-header";
 
 const WEEKDAYS = ["Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy"];
 
@@ -16,7 +17,6 @@ export default function BirthdaysPage() {
   const auth = useAuthGuard();
   const router = useRouter();
   const friendsQuery = useFriends(auth.user?._id);
-  const { showToast } = useToast();
 
   const groups = useMemo(() => {
     const list = friendsQuery.data || [];
@@ -59,12 +59,12 @@ export default function BirthdaysPage() {
     try {
       const conv = await contactsService.findOrCreateDirectConversation(auth.user._id, friendId);
       if (conv && (conv._id || conv.id)) {
-        router.push(`/?conversationId=${conv._id || conv.id}`);
+        router.push(`/?conversation=${conv._id || conv.id}`);
       } else {
-        router.push(`/?conversationId=${friendId}`);
+        router.push(`/?conversation=${friendId}`);
       }
-    } catch (e) {
-      router.push(`/?conversationId=${friendId}`);
+    } catch {
+      router.push(`/?conversation=${friendId}`);
     }
   };
 
@@ -108,25 +108,33 @@ export default function BirthdaysPage() {
   };
 
   return (
-    <main className="h-screen overflow-hidden bg-slate-50 text-slate-800">
-      <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3">
-        <div className="flex items-center gap-4">
-          <button onClick={() => router.back()} className="rounded-full p-2 text-slate-600 transition hover:bg-slate-100">
-            <ArrowLeft size={24} />
-          </button>
-          <h1 className="text-[17px] font-semibold">Sinh nhật</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={() => router.push("/contacts/birthdays/calendar")} className="rounded-full p-2 text-slate-600 transition hover:bg-slate-100">
-            <Calendar size={22} />
-          </button>
-          <button onClick={() => router.push("/contacts/birthdays/settings")} className="rounded-full p-2 text-slate-600 transition hover:bg-slate-100">
-            <Settings size={22} />
-          </button>
-        </div>
-      </header>
+    <ContactsShell>
+      <ContactsSubpageHeader
+        title="Sinh nhật"
+        onBack={() => router.back()}
+        right={
+          <>
+            <button
+              type="button"
+              onClick={() => router.push("/contacts/birthdays/calendar")}
+              className="rounded-full p-2 text-slate-600 transition hover:bg-slate-100"
+              aria-label="Lịch"
+            >
+              <Calendar size={22} />
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push("/contacts/birthdays/settings")}
+              className="rounded-full p-2 text-slate-600 transition hover:bg-slate-100"
+              aria-label="Cài đặt"
+            >
+              <Settings size={22} />
+            </button>
+          </>
+        }
+      />
 
-      <div className="h-[calc(100vh-65px)] overflow-y-auto pb-8">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50 pb-4">
         {friendsQuery.isLoading && <div className="py-10 text-center text-sm text-slate-500">Đang tải dữ liệu...</div>}
         
         {!friendsQuery.isLoading && groups.past.length === 0 && groups.upcoming.length === 0 && (
@@ -160,6 +168,6 @@ export default function BirthdaysPage() {
           </div>
         )}
       </div>
-    </main>
+    </ContactsShell>
   );
 }

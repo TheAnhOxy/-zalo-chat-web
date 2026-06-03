@@ -1,9 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 import { useState } from "react";
 import { useToast } from "@/src/components/providers/toast-provider";
+import { ContactsShell } from "@/src/components/layout/contacts-shell";
+import { ContactsSubpageHeader } from "@/src/components/layout/contacts-subpage-header";
 
 export default function BirthdaySettingsPage() {
   const router = useRouter();
@@ -19,15 +20,10 @@ export default function BirthdaySettingsPage() {
   };
 
   return (
-    <main className="h-screen bg-slate-50 text-slate-800">
-      <header className="flex items-center gap-4 border-b border-slate-200 bg-white px-4 py-4">
-        <button onClick={() => router.back()} className="rounded-full p-2 text-slate-600 transition hover:bg-slate-100">
-          <ArrowLeft size={24} />
-        </button>
-        <h1 className="text-xl font-bold">Cài đặt sinh nhật</h1>
-      </header>
-
-      <div className="mx-auto w-full max-w-xl p-4 md:p-8 space-y-4">
+    <ContactsShell>
+      <ContactsSubpageHeader title="Cài đặt sinh nhật" onBack={() => router.back()} />
+      <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50">
+      <div className="mx-auto w-full max-w-xl space-y-4 p-4 md:p-8">
         <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between">
             <div className="pr-4">
@@ -54,6 +50,7 @@ export default function BirthdaySettingsPage() {
           </div>
         </div>
       </div>
-    </main>
+      </div>
+    </ContactsShell>
   );
 }

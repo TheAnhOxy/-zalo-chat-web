@@ -2,7 +2,6 @@
 
 import Image from "next/image";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { socketService } from "@/src/services/socket/socket.service";
 import { useEffect, useRef, useState } from "react";
 import {
   Eye,
@@ -13,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { AppNavSidebar } from "@/src/components/layout/app-nav-sidebar";
+import { MobileBottomNav } from "@/src/components/layout/mobile-bottom-nav";
 import { ChatListPanel } from "@/src/components/chat/ChatListPanel";
 import { dedupeConversations } from "@/src/lib/conversation-list";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -97,31 +97,6 @@ export default function HomePage() {
     enabled: Boolean(auth.isInitialized && currentUserId),
     staleTime: 30_000,
   });
-
-  // ✅ Real-time: cập nhật danh sách conversation khi có tin nhắn mới
-  useEffect(() => {
-    if (!currentUserId) return;
-
-    const handleNewMessage = () => {
-      queryClient.invalidateQueries({ queryKey: ["conversations", currentUserId] });
-    };
-
-    const handleConversationUpdated = () => {
-      queryClient.invalidateQueries({ queryKey: ["conversations", currentUserId] });
-    };
-
-    socketService.on("new_message", handleNewMessage);
-    socketService.on("conversation_updated", handleConversationUpdated);
-    socketService.on("conversation_created", handleConversationUpdated);
-    socketService.on("conversation_removed", handleConversationUpdated);
-
-    return () => {
-      socketService.off("new_message", handleNewMessage);
-      socketService.off("conversation_updated", handleConversationUpdated);
-      socketService.off("conversation_created", handleConversationUpdated);
-      socketService.off("conversation_removed", handleConversationUpdated);
-    };
-  }, [currentUserId, queryClient]);
 
   useEffect(() => {
     if (!profile) {
@@ -299,30 +274,44 @@ export default function HomePage() {
     return <PageLoader />;
   }
 
+  const showMobileChat = Boolean(activeConversationId);
+
   return (
-    <main className="h-screen overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-amber-50 text-slate-800">
-      <div className="h-full w-full md:grid md:grid-cols-[72px_330px_1fr]">
+    <main className="flex h-[100dvh] flex-col overflow-hidden bg-gradient-to-br from-emerald-50 via-white to-amber-50 text-slate-800 md:h-screen">
+      <div className="flex min-h-0 flex-1 flex-col md:grid md:grid-cols-[72px_330px_1fr]">
         <AppNavSidebar activeTab="messages" />
 
         {currentUserId ? (
-          <ChatListPanel
-            userId={currentUserId}
-            userName={userName}
-            userAvatar={profile?.avatar || auth.user?.avatar}
-            conversations={conversationsQuery.data ?? []}
-            isLoading={conversationsQuery.isLoading}
-            activeConversationId={activeConversationId}
-            onOpenConversation={(id) => {
-              setActiveConversationId(id);
-              router.replace(`/?conversation=${id}`, { scroll: false });
-            }}
-            onRefresh={async () => {
-              await conversationsQuery.refetch();
-            }}
-          />
+          <div
+            className={`min-h-0 flex-col ${
+              showMobileChat ? "hidden md:flex md:h-full" : "flex flex-1 pb-14 md:pb-0 md:h-full"
+            }`}
+          >
+            <ChatListPanel
+              userId={currentUserId}
+              userName={userName}
+              userAvatar={profile?.avatar || auth.user?.avatar}
+              conversations={conversationsQuery.data ?? []}
+              isLoading={conversationsQuery.isLoading}
+              activeConversationId={activeConversationId}
+              onOpenConversation={(id) => {
+                setActiveConversationId(id);
+                router.replace(`/?conversation=${id}`, { scroll: false });
+              }}
+              onRefresh={async () => {
+                await conversationsQuery.refetch();
+              }}
+            />
+          </div>
         ) : null}
 
-        <section className="relative h-full min-h-0 bg-white">
+        <section
+          className={`relative min-h-0 min-w-0 overflow-hidden bg-white ${
+            showMobileChat
+              ? "flex flex-1 flex-col"
+              : "hidden min-h-0 flex-1 flex-col md:flex"
+          }`}
+        >
           {activeConversationId ? (
             <ChatWindow
               conversationId={activeConversationId}
@@ -340,6 +329,8 @@ export default function HomePage() {
           )}
         </section>
       </div>
+
+      {!showMobileChat ? <MobileBottomNav activeTab="messages" /> : null}
 
       {showProfileModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 px-4">

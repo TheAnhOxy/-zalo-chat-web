@@ -127,7 +127,7 @@ export function ChatHeader({
       role="banner"
     >
       <div className="flex items-center">
-        <HeaderIconButton label="Quay lại" onClick={() => router.push("/")}>
+        <HeaderIconButton label="Quay lại" onClick={() => router.replace("/")}>
           <ArrowLeft className="h-[22px] w-[22px] stroke-[2]" />
         </HeaderIconButton>
 

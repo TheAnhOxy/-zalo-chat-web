@@ -2,6 +2,7 @@ import { IMessage } from "@/src/types/message";
 
 export type MessageGroupItem =
   | { kind: "date"; key: string; label: string }
+  | { kind: "system"; key: string; message: IMessage }
   | { kind: "message"; key: string; message: IMessage; showAvatar: boolean; isMine: boolean }
   | { kind: "mediaGroup"; key: string; messages: IMessage[]; showAvatar: boolean; isMine: boolean };
 
@@ -49,6 +50,16 @@ export function groupMessagesForList(
       items.push({ kind: "date", key: `date-${dateKey}`, label: formatDateSeparator(message.createdAt) });
       lastDateKey = dateKey;
       lastSenderId = "";
+    }
+
+    if (message.type === "SYSTEM") {
+      items.push({
+        kind: "system",
+        key: message.clientTempId || message._id,
+        message,
+      });
+      lastSenderId = "";
+      continue;
     }
 
     const isMine = message.senderId === currentUserId;
@@ -194,6 +205,18 @@ export function formatLastMessagePreview(
   if (raw.startsWith("LEAVE_GROUP|")) {
     const actor = raw.split("|")[1]?.trim() || "Ai đó";
     return `${actor} đã rời khỏi nhóm`;
+  }
+  if (raw.startsWith("MAKE_ADMIN|")) {
+    const parts = raw.split("|");
+    const member = parts[1]?.trim() || "một thành viên";
+    const by = parts[2]?.trim() || "Ai đó";
+    return `${by} đã đặt ${member} làm quản trị viên`;
+  }
+  if (raw.startsWith("REVOKE_ADMIN|")) {
+    const parts = raw.split("|");
+    const member = parts[1]?.trim() || "một thành viên";
+    const by = parts[2]?.trim() || "Ai đó";
+    return `${by} đã thu hồi quyền quản trị của ${member}`;
   }
   if (raw.startsWith("PIN_MESSAGE|")) return "Đã ghim một tin nhắn";
   if (raw.startsWith("UNPIN_MESSAGE|")) return "Đã bỏ ghim một tin nhắn";
