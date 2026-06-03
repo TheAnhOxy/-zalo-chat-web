@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthGuard } from "@/src/hooks/use-auth-guard";
 import { contactsService } from "@/src/services/contacts/contacts.service";
@@ -21,8 +21,37 @@ export default function AddFriendPage() {
   const [countryCode, setCountryCode] = useState("+84");
   const [message, setMessage] = useState("Xin chào, tôi muốn kết bạn với bạn!");
   const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
   const [foundUser, setFoundUser] = useState<IUser | null>(null);
   const [searched, setSearched] = useState(false);
+  const [relation, setRelation] = useState<{
+    id: string;
+    status: string;
+    iAmRequester: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!auth.user?._id || !foundUser) {
+      setRelation(null);
+      return;
+    }
+    let cancelled = false;
+    void contactsService.getFriendshipBetween(auth.user._id, foundUser._id).then((rel) => {
+      if (cancelled) return;
+      if (!rel) {
+        setRelation(null);
+        return;
+      }
+      setRelation({
+        id: rel.id,
+        status: rel.status,
+        iAmRequester: rel.requesterId === auth.user!._id,
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [auth.user?._id, foundUser]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,17 +85,40 @@ export default function AddFriendPage() {
   };
 
   const handleAddFriend = async () => {
-    if (!auth.user || !foundUser) return;
+    if (!auth.user || !foundUser || sending) return;
+
+    if (relation?.status === "ACCEPTED") {
+      showToast("Hai bạn đã là bạn bè", "error");
+      return;
+    }
+    if (relation?.status === "PENDING" && relation.iAmRequester) {
+      showToast("Bạn đã gửi lời mời rồi — xem mục Lời mời kết bạn → Đã gửi", "error");
+      return;
+    }
+    if (relation?.status === "PENDING" && !relation.iAmRequester) {
+      showToast("Người này đã gửi lời mời cho bạn — vào Lời mời kết bạn để chấp nhận", "error");
+      return;
+    }
+
+    setSending(true);
     try {
       await contactsService.sendFriendRequest(auth.user._id, foundUser._id, message);
       showToast("Đã gửi lời mời kết bạn", "success");
       setFoundUser(null);
+      setRelation(null);
       setPhone("");
       setMessage("Xin chào, tôi muốn kết bạn với bạn!");
       setSearched(false);
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { message?: string } } };
-      showToast(err.response?.data?.message || "Lời mời kết bạn đã tồn tại hoặc đã là bạn bè", "error");
+      const err = e as { response?: { data?: { message?: string | string[] } } };
+      const raw = err.response?.data?.message;
+      const msg = Array.isArray(raw) ? raw[0] : raw;
+      showToast(
+        msg || "Lời mời kết bạn đã tồn tại hoặc đã là bạn bè",
+        "error"
+      );
+    } finally {
+      setSending(false);
     }
   };
 
@@ -172,12 +224,31 @@ export default function AddFriendPage() {
                     rows={2}
                   />
                 </div>
+                {relation?.status === "ACCEPTED" && (
+                  <p className="mt-2 text-sm font-medium text-emerald-700">Hai bạn đã là bạn bè</p>
+                )}
+                {relation?.status === "PENDING" && relation.iAmRequester && (
+                  <p className="mt-2 text-sm font-medium text-amber-700">
+                    Bạn đã gửi lời mời — xem tab &quot;Đã gửi&quot; trong Lời mời kết bạn
+                  </p>
+                )}
+                {relation?.status === "PENDING" && !relation.iAmRequester && (
+                  <p className="mt-2 text-sm font-medium text-amber-700">
+                    Người này đã gửi lời mời cho bạn — vào Lời mời kết bạn để chấp nhận
+                  </p>
+                )}
                 <button
                   type="button"
                   onClick={handleAddFriend}
-                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white shadow-md transition hover:bg-emerald-500"
+                  disabled={
+                    sending ||
+                    relation?.status === "ACCEPTED" ||
+                    (relation?.status === "PENDING" && relation.iAmRequester)
+                  }
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white shadow-md transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <UserPlus size={18} /> Gửi lời mời kết bạn
+                  <UserPlus size={18} />
+                  {sending ? "Đang gửi..." : "Gửi lời mời kết bạn"}
                 </button>
               </div>
             </div>
