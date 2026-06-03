@@ -2,7 +2,9 @@
 
 import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Loader2, Pencil } from "lucide-react";
+import { Loader2, Pencil } from "lucide-react";
+import { ContactsShell } from "@/src/components/layout/contacts-shell";
+import { ContactsSubpageHeader } from "@/src/components/layout/contacts-subpage-header";
 import { useAuthGuard } from "@/src/hooks/use-auth-guard";
 import { PageLoader } from "@/src/components/ui/page-state";
 import { usePeerProfile } from "@/src/hooks/usePeerProfile";
@@ -53,29 +55,21 @@ export default function SendFriendRequestPage({ params }: PageProps) {
   if (!auth.isInitialized || !auth.user) return <PageLoader />;
   if (isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[var(--qc-bg)]">
-        <Loader2 className="h-8 w-8 animate-spin text-[var(--qc-primary)]" />
-      </div>
+      <ContactsShell>
+        <div className="flex flex-1 items-center justify-center bg-[var(--qc-bg)]">
+          <Loader2 className="h-8 w-8 animate-spin text-[var(--qc-primary)]" />
+        </div>
+      </ContactsShell>
     );
   }
 
   const name = targetUser?.fullName?.trim() || "Người dùng";
 
   return (
-    <div className="flex h-screen flex-col bg-[var(--qc-bg)]">
-      <header className="flex shrink-0 items-center gap-1 bg-[var(--qc-primary)] px-1 py-2 text-white">
-        <button
-          type="button"
-          onClick={() => router.back()}
-          className="rounded-full p-2 hover:bg-white/10"
-          aria-label="Quay lại"
-        >
-          <ArrowLeft className="h-5 w-5" />
-        </button>
-        <h1 className="flex-1 text-[17px] font-semibold">Kết bạn</h1>
-      </header>
+    <ContactsShell>
+      <ContactsSubpageHeader variant="primary" title="Kết bạn" onBack={() => router.back()} />
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--qc-bg)] p-4">
         <div className="rounded-2xl bg-white p-4 pt-5 shadow-sm">
           <div className="flex items-center gap-3">
             <AvatarWidget url={targetUser?.avatar} name={name} size={48} />
@@ -104,7 +98,7 @@ export default function SendFriendRequestPage({ params }: PageProps) {
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-[var(--qc-divider)] bg-white p-4">
+      <div className="shrink-0 border-t border-[var(--qc-divider)] bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <button
           type="button"
           disabled={sending || !message.trim()}
@@ -115,6 +109,6 @@ export default function SendFriendRequestPage({ params }: PageProps) {
           Gửi lời mời
         </button>
       </div>
-    </div>
+    </ContactsShell>
   );
 }

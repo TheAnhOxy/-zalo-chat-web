@@ -3,7 +3,7 @@
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuthGuard } from "@/src/hooks/use-auth-guard";
-import { AppNavSidebar } from "@/src/components/layout/app-nav-sidebar";
+import { AiShell } from "@/src/components/layout/ai-shell";
 import { AiChatPanel } from "@/src/components/ai/AiChatPanel";
 import { PageLoader } from "@/src/components/ui/page-state";
 
@@ -16,18 +16,16 @@ function AiPageContent() {
   if (!auth.isInitialized || !auth.user) return <PageLoader />;
 
   return (
-    <main className="h-screen overflow-hidden bg-[var(--qc-bg)] text-slate-800">
-      <div className="h-full w-full md:grid md:grid-cols-[72px_1fr]">
-        <AppNavSidebar activeTab="ai" />
-        <section className="h-full min-h-0 overflow-hidden">
-          <AiChatPanel
-            userId={auth.user._id}
-            targetConversationId={targetConversationId}
-            autoSummarizeOnOpen={autoSummarize && Boolean(targetConversationId)}
-          />
-        </section>
-      </div>
-    </main>
+    <AiShell>
+      <section className="flex h-full min-h-0 w-full flex-col overflow-hidden">
+        <AiChatPanel
+          layout="page"
+          userId={auth.user._id}
+          targetConversationId={targetConversationId}
+          autoSummarizeOnOpen={autoSummarize && Boolean(targetConversationId)}
+        />
+      </section>
+    </AiShell>
   );
 }
 

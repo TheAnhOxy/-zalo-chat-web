@@ -7,6 +7,12 @@ export const metadata: Metadata = {
   description: "Chat App built with Next.js and NestJS",
 };
 
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
+
 export default function RootLayout({
   children,
 }: {

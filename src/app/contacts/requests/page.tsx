@@ -8,8 +8,10 @@ import { PageLoader } from "@/src/components/ui/page-state";
 import { contactsService } from "@/src/services/contacts/contacts.service";
 import { useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/src/components/providers/toast-provider";
-import { ArrowLeft, Check, UserX, Settings } from "lucide-react";
+import { Settings } from "lucide-react";
 import Image from "next/image";
+import { ContactsShell } from "@/src/components/layout/contacts-shell";
+import { ContactsSubpageHeader } from "@/src/components/layout/contacts-subpage-header";
 
 type Tab = "RECEIVED" | "SENT";
 
@@ -60,23 +62,23 @@ export default function FriendRequestsPage() {
   };
 
   return (
-    <main className="h-screen overflow-hidden bg-slate-50 text-slate-800">
-      <div className="flex h-full flex-col">
-        {/* Header */}
-        <header className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-4">
-          <div className="flex items-center gap-4">
-            <button onClick={() => router.back()} className="rounded-full p-2 text-slate-600 transition hover:bg-slate-100">
-              <ArrowLeft size={24} />
-            </button>
-            <h1 className="text-xl font-bold">Lời mời kết bạn</h1>
-          </div>
-          <button onClick={() => router.push("/contacts/requests/settings")} className="rounded-full p-2 text-slate-600 transition hover:bg-slate-100">
+    <ContactsShell>
+      <ContactsSubpageHeader
+        title="Lời mời kết bạn"
+        onBack={() => router.back()}
+        right={
+          <button
+            type="button"
+            onClick={() => router.push("/contacts/requests/settings")}
+            className="rounded-full p-2 text-slate-600 transition hover:bg-slate-100"
+            aria-label="Cài đặt"
+          >
             <Settings size={22} />
           </button>
-        </header>
-
-        {/* Content */}
-        <div className="mx-auto w-full max-w-3xl flex-1 p-4 md:p-6">
+        }
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50">
+        <div className="mx-auto w-full max-w-3xl p-4 md:p-6">
           <div className="mb-6 flex gap-4 border-b border-slate-200">
             <button
               onClick={() => setActiveTab("RECEIVED")}
@@ -181,6 +183,6 @@ export default function FriendRequestsPage() {
           </div>
         </div>
       </div>
-    </main>
+    </ContactsShell>
   );
 }
