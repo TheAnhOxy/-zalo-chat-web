@@ -10,6 +10,7 @@ import {
   User,
   Sparkles,
 } from "lucide-react";
+import { useNotifications } from "@/src/hooks/use-notifications";
 
 export type AppNavTab = "messages" | "contacts" | "stories" | "notifications" | "profile" | "ai";
 
@@ -64,7 +65,7 @@ function resolveActiveTab(pathname: string): AppNavTab | null {
   return MAIN_NAV_ITEMS.find((item) => item.match(pathname))?.id ?? null;
 }
 
-function NavButton({ item, active }: { item: NavItem; active: boolean }) {
+function NavButton({ item, active, badgeCount, onClick }: { item: NavItem; active: boolean; badgeCount?: number; onClick?: () => void }) {
   const Icon = item.icon;
   return (
     <Link
@@ -72,6 +73,7 @@ function NavButton({ item, active }: { item: NavItem; active: boolean }) {
       title={item.label}
       aria-label={item.label}
       aria-current={active ? "page" : undefined}
+      onClick={onClick}
       className={`relative flex h-12 w-full items-center justify-center transition-colors ${
         active
           ? "bg-[var(--qc-primary-light)] text-[var(--qc-primary)] before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-[var(--qc-primary)]"
@@ -79,6 +81,11 @@ function NavButton({ item, active }: { item: NavItem; active: boolean }) {
       }`}
     >
       <Icon size={22} strokeWidth={active ? 2.5 : 2} />
+      {badgeCount !== undefined && badgeCount > 0 && (
+        <span className="absolute right-3 top-2 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white shadow-sm ring-2 ring-[var(--qc-card)]">
+          {badgeCount > 99 ? "99+" : badgeCount}
+        </span>
+      )}
     </Link>
   );
 }
@@ -90,13 +97,26 @@ type AppNavSidebarProps = {
 export function AppNavSidebar({ activeTab }: AppNavSidebarProps) {
   const pathname = usePathname();
   const current = activeTab ?? resolveActiveTab(pathname);
+  const { unreadCount, markAllAsRead } = useNotifications();
   const aiActive = current === "ai";
+
+  const handleTabClick = (itemId: AppNavTab) => {
+    if (itemId === "notifications" && unreadCount > 0) {
+      markAllAsRead();
+    }
+  };
 
   return (
     <aside className="relative hidden h-full w-[72px] shrink-0 flex-col items-center border-r border-[var(--qc-divider)] bg-[var(--qc-card)] shadow-[2px_0_8px_rgba(0,0,0,0.04)] md:flex">
       <nav className="flex w-full flex-col items-center gap-0.5 px-0 pt-4">
         {MAIN_NAV_ITEMS.map((item) => (
-          <NavButton key={item.id} item={item} active={current === item.id} />
+          <NavButton 
+            key={item.id} 
+            item={item} 
+            active={current === item.id} 
+            badgeCount={item.id === "notifications" ? unreadCount : undefined}
+            onClick={() => handleTabClick(item.id)}
+          />
         ))}
 
         <div className="my-1.5 h-px w-10 bg-[var(--qc-divider)]" aria-hidden />

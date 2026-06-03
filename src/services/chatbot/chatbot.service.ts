@@ -104,11 +104,11 @@ export const chatbotService = {
 
   async uploadFile(file: File): Promise<{ fileUrl: string; mimeType: string; name: string }> {
     const mimeType = file.type || guessMimeType(file.name);
-    const presignRes = await apiClient.get<{ url?: string; fileUrl?: string }>(
+    const presignRes = await apiClient.get<{ uploadUrl?: string; fileUrl?: string }>(
       "/upload/presigned-url",
       { params: { fileName: file.name, contentType: mimeType } }
     );
-    const uploadUrl = presignRes.data.url;
+    const uploadUrl = presignRes.data.uploadUrl;
     const fileUrl = presignRes.data.fileUrl;
     if (!uploadUrl || !fileUrl) {
       throw new Error("Không lấy được presigned url để upload file");
