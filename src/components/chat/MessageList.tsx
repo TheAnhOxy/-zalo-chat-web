@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useVirtualizer } from "@tanstack/react-virtual";
 import { IMessage, ReactionType } from "@/src/types/message";
 import { ICall } from "@/src/types/call";
 import {
@@ -30,6 +29,7 @@ interface MessageListProps {
   locale?: ChatLocale;
   hasMore: boolean;
   loading: boolean;
+  isFetchingNextPage?: boolean;
   searchQuery?: string;
   jumpToMessageId?: string | null;
   onLoadOlder: () => void;
@@ -62,6 +62,7 @@ export function MessageList({
   locale = "vi",
   hasMore,
   loading,
+  isFetchingNextPage = false,
   searchQuery = "",
   jumpToMessageId = null,
   onLoadOlder,
@@ -79,8 +80,6 @@ export function MessageList({
   onViewAllPinned,
 }: MessageListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
-  const initialScrollDoneRef = useRef(false);
-  const prevConversationRef = useRef<string | null>(null);
   const setUi = useChatStore((s) => s.setUi);
   const isAtBottom = useChatStore((s) => s.ui.isAtBottom);
 
@@ -221,66 +220,34 @@ export function MessageList({
 
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
-  const estimateRowSize = useCallback(
-    (index: number) => {
-      const item = groups[index];
-      if (!item || item.kind === "call") return 96;
-      if (item.kind === "date" || item.kind === "system" || item.kind === "message") {
-        return estimateMessageListRowHeight(item);
-      }
-      return 72;
-    },
-    [groups]
-  );
-
-  const rowVirtualizer = useVirtualizer({
-    count: groups.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: estimateRowSize,
-    overscan: 10,
-    getItemKey: (index) => groups[index]?.key ?? index,
-  });
+  const reversedGroups = useMemo(() => {
+    return [...groups].reverse();
+  }, [groups]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-    if (!groups.length) return;
-    rowVirtualizer.scrollToIndex(groups.length - 1, { align: "end", behavior });
-  }, [groups.length, rowVirtualizer]);
+    if (!parentRef.current) return;
+    // With column-reverse, scrollTop = 0 is the bottom!
+    parentRef.current.scrollTo({ top: 0, behavior });
+  }, []);
 
-  const remeasureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const remeasureRows = useCallback(() => {
-    if (remeasureTimerRef.current) clearTimeout(remeasureTimerRef.current);
-    remeasureTimerRef.current = setTimeout(() => {
-      rowVirtualizer.measure();
-      if (useChatStore.getState().ui.isAtBottom) {
-        scrollToBottom("auto");
-      }
-    }, 80);
-  }, [rowVirtualizer, scrollToBottom]);
-
-  useEffect(
-    () => () => {
-      if (remeasureTimerRef.current) clearTimeout(remeasureTimerRef.current);
-    },
-    []
-  );
+    // Không còn virtualizer, chỉ cần cuộn đáy nếu đang ở đáy
+    if (useChatStore.getState().ui.isAtBottom) {
+      scrollToBottom("auto");
+    }
+  }, [scrollToBottom]);
 
   const handleJumpToMessage = useCallback(
     (messageId: string) => {
-      const index = allGroups.findIndex(
-        (item) =>
-          item.kind === "message" && item.message._id === messageId
-      );
-      if (index === -1) return;
-      if (searchQuery) {
-        setUi({ searchQuery: "" });
-      }
-      requestAnimationFrame(() => {
-        rowVirtualizer.scrollToIndex(index, { align: "center", behavior: "smooth" });
+      // Tìm element trong DOM và cuộn tới đó
+      const el = parentRef.current?.querySelector(`[data-message-id="${messageId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
         setHighlightedId(messageId);
         setTimeout(() => setHighlightedId(null), 2000);
-      });
+      }
     },
-    [allGroups, rowVirtualizer, searchQuery, setUi]
+    []
   );
 
   useEffect(() => {
@@ -288,40 +255,29 @@ export function MessageList({
   }, [jumpToMessageId, handleJumpToMessage]);
 
   useEffect(() => {
-    if (prevConversationRef.current !== conversationId) {
-      prevConversationRef.current = conversationId;
-      initialScrollDoneRef.current = false;
-      setUi({ isAtBottom: true });
-    }
+    setUi({ isAtBottom: true });
   }, [conversationId, setUi]);
-
-  useEffect(() => {
-    if (loading || !groups.length || initialScrollDoneRef.current) return;
-    initialScrollDoneRef.current = true;
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        rowVirtualizer.scrollToIndex(groups.length - 1, { align: "end", behavior: "auto" });
-      });
-    });
-  }, [conversationId, loading, groups.length, rowVirtualizer]);
 
   useEffect(() => {
     if (isAtBottom) scrollToBottom("auto");
   }, [messages.length, isAtBottom, scrollToBottom]);
 
-  useEffect(() => {
-    remeasureRows();
-  }, [groups.length, conversationId, remeasureRows]);
-
   const handleScroll = useCallback(() => {
     const el = parentRef.current;
     if (!el) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    // Trong column-reverse, scrollTop = 0 là ở đáy (mới nhất).
+    // Scroll lên để xem tin cũ (tức scrollTop tăng lên).
+    // Ở một số trình duyệt scrollTop có thể âm, dùng Math.abs cho an toàn.
+    const top = Math.abs(el.scrollTop);
+    const atBottom = top < 80;
     setUi({ isAtBottom: atBottom });
-    if (el.scrollTop < 100 && hasMore && !loading) {
+    
+    // Khi cuộn gần tới "đỉnh" nội dung (nghĩa là xem tin cũ)
+    const atTop = el.scrollHeight - top - el.clientHeight < 150;
+    if (atTop && hasMore && !isFetchingNextPage) {
       onLoadOlder();
     }
-  }, [hasMore, loading, onLoadOlder, setUi]);
+  }, [hasMore, isFetchingNextPage, onLoadOlder, setUi]);
 
   if (!groups.length && !loading) {
     return (
@@ -357,191 +313,169 @@ export function MessageList({
       <div
         ref={parentRef}
         className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-1 py-2"
+        style={{ display: "flex", flexDirection: "column-reverse" }}
         onScroll={handleScroll}
         role="log"
         aria-label="Danh sách tin nhắn"
         aria-live="polite"
         tabIndex={0}
       >
-        <div
-          style={{
-            height: `${rowVirtualizer.getTotalSize()}px`,
-            width: "100%",
-            position: "relative",
-          }}
-        >
-          {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-            const item = groups[virtualRow.index];
-            const prevItem = virtualRow.index > 0 ? groups[virtualRow.index - 1] : null;
-            const isStackedMedia =
-              item.kind === "message" &&
-              prevItem?.kind === "message" &&
-              prevItem.message.senderId === item.message.senderId &&
-              (prevItem.message.type === "IMAGE" || prevItem.message.type === "VIDEO") &&
-              (item.message.type === "IMAGE" || item.message.type === "VIDEO");
-            return (
-              <div
-                key={item.key}
-                data-index={virtualRow.index}
-                ref={rowVirtualizer.measureElement}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  maxWidth: "100%",
-                  transform: `translateY(${virtualRow.start}px)`,
-                }}
-                className="max-w-full overflow-x-hidden pb-1"
-              >
-                {item.kind === "date" ? (
-                  <div className="my-3 text-center text-xs text-gray-500" role="separator">
-                    {item.label}
-                  </div>
-                ) : item.kind === "system" ? (
-                  <SystemMessageLine
-                    message={item.message}
-                    onViewAllPinned={onViewAllPinned}
-                  />
-                ) : item.kind === "message" ? (
-                  <MessageItem
-                    onMediaLoad={remeasureRows}
-                    stackedMedia={isStackedMedia}
-                    message={item.message}
-                    isMine={item.isMine}
-                    showAvatar={item.showAvatar}
-                    avatar={participantMap[item.message.senderId]?.avatar}
-                    senderName={participantMap[item.message.senderId]?.name}
-                    replyMessage={
-                      item.message.replyTo ? replyMap[item.message.replyTo] ?? null : null
-                    }
-                    locale={locale}
-                    isHighlighted={highlightedId === item.message._id}
-                    onJumpToReply={item.message.replyTo ? () => handleJumpToMessage(item.message.replyTo!) : undefined}
-                    onReply={() => onReply(item.message)}
-                    onEdit={
-                      allowEdit && item.isMine ? () => onEdit(item.message) : undefined
-                    }
-                    onDeleteForMe={() => onDeleteForMe(item.message._id)}
-                    onRecall={() => onRecall(item.message._id)}
-                    onForward={() => onForward([item.message._id])}
-                    currentUserId={currentUserId}
-                    onReact={(type) => onReact(item.message._id, type)}
-                    onRemoveReaction={
-                      onRemoveReaction
-                        ? () => onRemoveReaction(item.message._id)
-                        : undefined
-                    }
-                    onRetry={() => onRetry(item.message)}
-                    isPinned={pinnedIdSet.has(item.message._id)}
-                    onPin={
-                      onPin && !pinnedIdSet.has(item.message._id)
-                        ? () => onPin(item.message._id)
-                        : undefined
-                    }
-                    onUnpin={
-                      onUnpin && pinnedIdSet.has(item.message._id)
-                        ? () => onUnpin(item.message._id)
-                        : undefined
-                    }
-                  />
-                ) : (
-                  (() => {
-                    const call = item.call;
-                    const isMine = call.callerId === currentUserId;
-                    // "Nhỡ" chỉ thực sự là nhỡ từ góc nhìn người NHẬN — người gọi thấy "không được trả lời"
-                    const isMissedForReceiver = !isMine && (call.status === "MISSED" || call.status === "REJECTED");
-                    const isVideo = call.type === "VIDEO";
-                    
-                    // Format duration
-                    const durationLabel =
-                      call.duration > 0
-                        ? (() => {
-                            const minutes = Math.floor(call.duration / 60);
-                            const seconds = call.duration % 60;
-                            if (minutes > 0) {
-                              return `${minutes} phút ${seconds} giây`;
-                            }
-                            return `${seconds} giây`;
-                          })()
-                        : "";
+        {reversedGroups.map((item, index) => {
+          const prevItem = index < reversedGroups.length - 1 ? reversedGroups[index + 1] : null;
+          const isStackedMedia =
+            item.kind === "message" &&
+            prevItem?.kind === "message" &&
+            prevItem.message.senderId === item.message.senderId &&
+            (prevItem.message.type === "IMAGE" || prevItem.message.type === "VIDEO") &&
+            (item.message.type === "IMAGE" || item.message.type === "VIDEO");
 
-                    const statusLabel = (() => {
-                      if (isMine) {
-                        return call.status === "MISSED" || call.status === "REJECTED"
-                          ? `Cuộc gọi ${isVideo ? "video" : "thoại"} không được trả lời`
-                          : `Cuộc gọi ${isVideo ? "video" : "thoại"}`;
-                      }
-                      if (call.status === "MISSED" || call.status === "REJECTED") {
-                        return "Cuộc gọi nhỡ";
-                      }
-                      return `Cuộc gọi ${isVideo ? "video" : "thoại"}`;
-                    })();
+          return (
+            <div
+              key={item.key}
+              data-message-id={item.kind === "message" ? item.message._id : undefined}
+              className="max-w-full overflow-x-hidden pb-1 shrink-0"
+            >
+              {item.kind === "date" ? (
+                <div className="my-3 text-center text-xs text-gray-500" role="separator">
+                  {item.label}
+                </div>
+              ) : item.kind === "system" ? (
+                <SystemMessageLine
+                  message={item.message}
+                  onViewAllPinned={onViewAllPinned}
+                />
+              ) : item.kind === "message" ? (
+                <MessageItem
+                  onMediaLoad={remeasureRows}
+                  stackedMedia={isStackedMedia}
+                  message={item.message}
+                  isMine={item.isMine}
+                  showAvatar={item.showAvatar}
+                  avatar={participantMap[item.message.senderId]?.avatar}
+                  senderName={participantMap[item.message.senderId]?.name}
+                  replyMessage={
+                    item.message.replyTo ? replyMap[item.message.replyTo] ?? null : null
+                  }
+                  locale={locale}
+                  isHighlighted={highlightedId === item.message._id}
+                  onJumpToReply={item.message.replyTo ? () => handleJumpToMessage(item.message.replyTo!) : undefined}
+                  onReply={() => onReply(item.message)}
+                  onEdit={
+                    allowEdit && item.isMine ? () => onEdit(item.message) : undefined
+                  }
+                  onDeleteForMe={() => onDeleteForMe(item.message._id)}
+                  onRecall={() => onRecall(item.message._id)}
+                  onForward={() => onForward([item.message._id])}
+                  currentUserId={currentUserId}
+                  onReact={(type) => onReact(item.message._id, type)}
+                  onRemoveReaction={
+                    onRemoveReaction
+                      ? () => onRemoveReaction(item.message._id)
+                      : undefined
+                  }
+                  onRetry={() => onRetry(item.message)}
+                  isPinned={pinnedIdSet.has(item.message._id)}
+                  onPin={
+                    onPin && !pinnedIdSet.has(item.message._id)
+                      ? () => onPin(item.message._id)
+                      : undefined
+                  }
+                  onUnpin={
+                    onUnpin && pinnedIdSet.has(item.message._id)
+                      ? () => onUnpin(item.message._id)
+                      : undefined
+                  }
+                />
+              ) : (
+                (() => {
+                  const call = item.call;
+                  const isMine = call.callerId === currentUserId;
+                  const isMissedForReceiver = !isMine && (call.status === "MISSED" || call.status === "REJECTED");
+                  const isVideo = call.type === "VIDEO";
+                  
+                  const durationLabel =
+                    call.duration > 0
+                      ? (() => {
+                          const minutes = Math.floor(call.duration / 60);
+                          const seconds = call.duration % 60;
+                          if (minutes > 0) {
+                            return `${minutes} phút ${seconds} giây`;
+                          }
+                          return `${seconds} giây`;
+                        })()
+                      : "";
 
-                    return (
-                      <div className={`flex gap-2 px-3 py-0.5 ${isMine ? "flex-row-reverse" : "flex-row"}`}>
-                        {/* Avatar / spacer theo grouping */}
-                        {!isMine && item.showAvatar && (
-                          <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gray-300">
-                            {participantMap[call.callerId]?.avatar ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={participantMap[call.callerId]?.avatar} alt="" className="h-full w-full object-cover" />
-                            ) : (
-                              <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-white">
-                                {participantMap[call.callerId]?.name?.charAt(0).toUpperCase() || "?"}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        {/* Spacer khi ẩn avatar để giữ căn lề */}
-                        {(!isMine && !item.showAvatar) && <div className="w-8 shrink-0" aria-hidden />}
-                        {isMine && <div className="w-8 shrink-0" aria-hidden />}
-                        
-                        <div className={`flex flex-col ${isMine ? "items-end" : "items-start"}`}>
-                          {/* Tên người gọi — chỉ hiện ở tin đầu nhóm (!isMine && showAvatar) */}
-                          {!isMine && item.showAvatar && participantMap[call.callerId]?.name && (
-                            <p className="mb-1 max-w-full truncate pl-1 text-[11px] text-[var(--qc-text-secondary)]">
-                              {participantMap[call.callerId].name}
-                            </p>
+                  const statusLabel = (() => {
+                    if (isMine) {
+                      return call.status === "MISSED" || call.status === "REJECTED"
+                        ? `Cuộc gọi ${isVideo ? "video" : "thoại"} không được trả lời`
+                        : `Cuộc gọi ${isVideo ? "video" : "thoại"}`;
+                    }
+                    if (call.status === "MISSED" || call.status === "REJECTED") {
+                      return "Cuộc gọi nhỡ";
+                    }
+                    return `Cuộc gọi ${isVideo ? "video" : "thoại"}`;
+                  })();
+
+                  return (
+                    <div className={`flex gap-2 px-3 py-0.5 ${isMine ? "flex-row-reverse" : "flex-row"}`}>
+                      {!isMine && item.showAvatar && (
+                        <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-gray-300">
+                          {participantMap[call.callerId]?.avatar ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={participantMap[call.callerId]?.avatar} alt="" className="h-full w-full object-cover" />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-white">
+                              {participantMap[call.callerId]?.name?.charAt(0).toUpperCase() || "?"}
+                            </div>
                           )}
-                          <div
-                            className={`flex items-center gap-2 rounded-lg px-3 py-2 max-w-xs ${
-                              isMissedForReceiver
-                                ? "bg-red-100 text-red-700"        // người nhận thấy cuộc gọi nhỡ → đỏ
-                                : isMine
-                                  ? "bg-green-100 text-green-700"  // người gọi → xanh lá
-                                  : "bg-blue-100 text-blue-700"    // người nhận cuộc gọi thành công → xanh
-                            }`}
-                          >
-                            <div className="flex flex-col gap-1">
-                              <div className="flex items-center gap-1.5">
-                                {/* Icon: chỉ dùng missed icon khi người nhận thấy cuộc gọi nhỡ */}
-                                {isVideo ? (
-                                  isMissedForReceiver ? <VideoOff className="h-4 w-4" /> : <Video className="h-4 w-4" />
-                                ) : isMissedForReceiver ? (
-                                  <PhoneMissed className="h-4 w-4" />
-                                ) : (
-                                  <Phone className="h-4 w-4" />
-                                )}
-                                <span className="text-sm font-medium">{statusLabel}</span>
-                              </div>
-                              <div className="flex items-center gap-2 text-xs">
-                                <span>{durationLabel || "Không có nội dung"}</span>
-                                <span className="shrink-0 opacity-70">
-                                  {formatChatTime(call.createdAt)}
-                                </span>
-                              </div>
+                        </div>
+                      )}
+                      {(!isMine && !item.showAvatar) && <div className="w-8 shrink-0" aria-hidden />}
+                      {isMine && <div className="w-8 shrink-0" aria-hidden />}
+                      
+                      <div className={`flex flex-col ${isMine ? "items-end" : "items-start"}`}>
+                        {!isMine && item.showAvatar && participantMap[call.callerId]?.name && (
+                          <p className="mb-1 max-w-full truncate pl-1 text-[11px] text-[var(--qc-text-secondary)]">
+                            {participantMap[call.callerId].name}
+                          </p>
+                        )}
+                        <div
+                          className={`flex items-center gap-2 rounded-lg px-3 py-2 max-w-xs ${
+                            isMissedForReceiver
+                              ? "bg-red-100 text-red-700"
+                              : isMine
+                                ? "bg-green-100 text-green-700"
+                                : "bg-blue-100 text-blue-700"
+                          }`}
+                        >
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-1.5">
+                              {isVideo ? (
+                                isMissedForReceiver ? <VideoOff className="h-4 w-4" /> : <Video className="h-4 w-4" />
+                              ) : isMissedForReceiver ? (
+                                <PhoneMissed className="h-4 w-4" />
+                              ) : (
+                                <Phone className="h-4 w-4" />
+                              )}
+                              <span className="text-sm font-medium">{statusLabel}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs">
+                              <span>{durationLabel || "Không có nội dung"}</span>
+                              <span className="shrink-0 opacity-70">
+                                {formatChatTime(call.createdAt)}
+                              </span>
                             </div>
                           </div>
                         </div>
                       </div>
-                    );
-                  })()
-                )}
-              </div>
-            );
-          })}
-        </div>
+                    </div>
+                  );
+                })()
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

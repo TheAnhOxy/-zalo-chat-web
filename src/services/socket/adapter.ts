@@ -28,6 +28,7 @@ export const SOCKET_SERVER = {
   userStatusChanged: "user_status_changed",
   messageUpdated: "message_updated",
   messageDeleted: "message_deleted",
+  messageRecalled: "message_recalled",
   conversationCallUpdated: "conversation_call_updated",
   callEnded: "call_ended",
   callRejected: "call_rejected",
