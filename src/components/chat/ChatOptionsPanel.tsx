@@ -307,7 +307,7 @@ export function ChatOptionsPanel({
     });
 
     void conversationsApi
-      .getMessages(conversation._id, currentUserId, { limit: 80, skip: 0 })
+      .getMessages(conversation._id, currentUserId, { limit: 80 })
       .then((page) => {
         const { media } = indexMessagesForGallery(page.messages);
         setMediaPreview(media.slice(-3).reverse());

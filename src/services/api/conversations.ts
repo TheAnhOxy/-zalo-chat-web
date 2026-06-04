@@ -77,14 +77,15 @@ export const conversationsApi = {
   getMessages(
     conversationId: string,
     userId: string,
-    options?: { limit?: number; beforeMessageId?: string }
+    options?: { limit?: number; skip?: number; beforeMessageId?: string }
   ): Promise<MessagesPage> {
     const limit = options?.limit ?? DEFAULT_LIMIT;
+    const skip = options?.skip ?? 0;
     const beforeMessageId = options?.beforeMessageId;
 
     return apiClient
       .get<unknown>(`/messages/conversation/${conversationId}`, {
-        params: { userId, limit, beforeMessageId },
+        params: { userId, limit, skip, beforeMessageId },
       })
       .then((res) => {
         const payload = res.data as any;
@@ -93,7 +94,7 @@ export const conversationsApi = {
         );
         return {
           messages: list,
-          skip: 0,
+          skip,
           hasMore: payload?.hasMore ?? payload?.metadata?.hasMore ?? (list.length >= limit),
         };
       });

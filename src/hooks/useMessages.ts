@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { conversationsApi } from "@/src/services/api/conversations";
+import { conversationsApi, MessagesPage } from "@/src/services/api/conversations";
 import { ChatSocket } from "@/src/services/socket/chat-socket";
 import { useChatStore, selectOrderedMessages } from "@/src/store/chat-store";
 import { IMessage, MessageType } from "@/src/types/message";
@@ -20,7 +20,7 @@ import {
   mediaClusterMetadata,
   serializeMediaClusterItems,
 } from "@/src/lib/media-cluster";
-import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { InfiniteData, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 
 const PAGE_LIMIT = 50;
 
@@ -68,12 +68,19 @@ export function useMessages(conversationId: string | undefined, currentUserId: s
     isFetchingNextPage,
     isLoading,
     refetch,
-  } = useInfiniteQuery({
+  } = useInfiniteQuery<
+    MessagesPage,
+    Error,
+    InfiniteData<MessagesPage, string | undefined>,
+    (string | undefined)[],
+    string | undefined
+  >({
     queryKey,
+    initialPageParam: undefined,
     queryFn: ({ pageParam }) =>
       conversationsApi.getMessages(conversationId!, currentUserId!, {
         limit: 30,
-        beforeMessageId: pageParam as string | undefined,
+        beforeMessageId: pageParam,
       }),
     getNextPageParam: (lastPage) =>
       lastPage.hasMore && lastPage.messages.length > 0
@@ -83,7 +90,7 @@ export function useMessages(conversationId: string | undefined, currentUserId: s
     refetchOnWindowFocus: false,
   });
 
-  const orderedMessages = useMemo(() => {
+  const orderedMessages = useMemo((): IMessage[] => {
     if (!data) return [];
     // The backend returns pages with messages sorted DESC (newest first).
     // We flatten them, then reverse so the oldest is at the top of the UI list.
