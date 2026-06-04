@@ -13,11 +13,37 @@ type IncomingListener = (data: IncomingCallPayload) => void;
 type ParticipantListener = (data: Record<string, unknown>) => void;
 type PeerStreamListener = (peerId: string, stream: MediaStream) => void;
 
+// ICE Servers: STUN dùng để discover public IP,
+// TURN dùng để RELAY media khi 2 peer ở sau NAT khác nhau (bắt buộc cho kết nối qua internet).
+// Để dùng TURN server riêng: thay url/username/credential bên dưới.
+// Free TURN: https://www.metered.ca/tools/openrelay/ hoặc Cloudflare TURN (có phí)
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
+    // STUN servers (giúp biết public IP)
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
+    { urls: "stun:stun2.l.google.com:19302" },
+    { urls: "stun:stun3.l.google.com:19302" },
+    // TURN servers (relay khi P2P không thể kết nối trực tiếp qua NAT)
+    // Dùng OpenRelay free TURN server — thay bằng TURN server riêng cho production
+    {
+      urls: "turn:openrelay.metered.ca:80",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443?transport=tcp",
+      username: "openrelayproject",
+      credential: "openrelayproject",
+    },
   ],
+  // Ưu tiên dùng relay khi các candidate type khác thất bại
+  iceCandidatePoolSize: 10,
 };
 
 const getKey = (id: string | null | undefined) => (id ?? "").trim();
