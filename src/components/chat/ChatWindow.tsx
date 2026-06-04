@@ -17,7 +17,7 @@ import { MessageSearchPanel } from "@/src/components/chat/MessageSearchPanel";
 import { ForwardMessageModal } from "@/src/components/chat/ForwardMessageModal";
 import { buildForwardMetadata } from "@/src/lib/forward-message";
 import { useChatStore } from "@/src/store/chat-store";
-import { IMessage, ReactionType } from "@/src/types/message";
+import { IMessage, IReaction, ReactionType } from "@/src/types/message";
 import { t } from "@/src/lib/i18n/chat";
 import { PageLoader } from "@/src/components/ui/page-state";
 import { ChatOptionsPanel } from "@/src/components/chat/ChatOptionsPanel";
@@ -266,7 +266,7 @@ export function ChatWindow({
   const handleReact = useCallback(
     (messageId: string, type: ReactionType) => {
       const msg = messages.find((m) => m._id === messageId);
-      const mine = msg?.reactions.find((r) => r.userId === userId);
+      const mine = (msg?.reactions ?? []).find((r: IReaction) => r.userId === userId);
       if (mine?.type === type) {
         socket.current?.removeReaction(messageId, conversationId);
       } else {
