@@ -16,23 +16,25 @@ export function shouldSendAsMediaCluster(files: File[]): boolean {
   return media.length >= 2;
 }
 
+function normalizeMediaClusterItem(raw: unknown): IMediaClusterItem | null {
+  if (!raw || typeof raw !== "object") return null;
+  const item = raw as Record<string, unknown>;
+  const url = String(item.url ?? "").trim();
+  const type = String(item.type ?? "").toUpperCase();
+  if (!url || (type !== "IMAGE" && type !== "VIDEO")) return null;
+  return {
+    url,
+    type: type as MediaClusterItemType,
+    thumbnail: item.thumbnail ? String(item.thumbnail) : undefined,
+  };
+}
+
 export function parseMediaClusterItems(message: IMessage): IMediaClusterItem[] {
   const fromMeta = message.metadata?.mediaItems;
   if (Array.isArray(fromMeta) && fromMeta.length > 0) {
     return fromMeta
-      .map((raw) => {
-        const item = raw as Record<string, unknown>;
-        const url = String(item.url ?? "").trim();
-        const type = String(item.type ?? "").toUpperCase();
-        if (!url) return null;
-        if (type !== "IMAGE" && type !== "VIDEO") return null;
-        return {
-          url,
-          type: type as MediaClusterItemType,
-          thumbnail: item.thumbnail ? String(item.thumbnail) : undefined,
-        };
-      })
-      .filter(Boolean) as IMediaClusterItem[];
+      .map((raw) => normalizeMediaClusterItem(raw))
+      .filter((item): item is IMediaClusterItem => item !== null);
   }
 
   const content = message.content?.trim();
@@ -42,14 +44,8 @@ export function parseMediaClusterItems(message: IMessage): IMediaClusterItem[] {
     const parsed = JSON.parse(content) as unknown;
     if (!Array.isArray(parsed)) return [];
     return parsed
-      .map((raw) => {
-        const item = raw as Record<string, unknown>;
-        const url = String(item.url ?? "").trim();
-        const type = String(item.type ?? "").toUpperCase();
-        if (!url || (type !== "IMAGE" && type !== "VIDEO")) return null;
-        return { url, type: type as MediaClusterItemType };
-      })
-      .filter(Boolean) as IMediaClusterItem[];
+      .map((raw) => normalizeMediaClusterItem(raw))
+      .filter((item): item is IMediaClusterItem => item !== null);
   } catch {
     return [];
   }
