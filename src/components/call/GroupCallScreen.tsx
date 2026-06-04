@@ -52,7 +52,13 @@ export function GroupCallScreen({
   returnHref,
 }: GroupCallScreenProps) {
   const router = useRouter();
-  const [state, setState] = useState<CallState>(callService.callState);
+  // BUG FIX: Không read trực tiếp callService.callState vì có thể bị stale "ended"
+  // từ 1 call trước đó. Nếu state = "ended" khi mount → useEffect goBack() sẽ chạy ngay!
+  // Guard: luôn bắt đầu từ trạng thái hợp lệ ("incoming" hoặc "idle") khi component mới mount.
+  const [state, setState] = useState<CallState>(() => {
+    const s = callService.callState;
+    return s === "ended" ? "idle" : s;
+  });
   const [seconds, setSeconds] = useState(0);
   const [muted, setMuted] = useState(false);
   const [camOff, setCamOff] = useState(false);
@@ -62,6 +68,9 @@ export function GroupCallScreen({
   const [error, setError] = useState<string | null>(null);
   const closingRef = useRef(false);
   const initializedRef = useRef(false);
+  // BUG FIX: Track xem component đã được init xong chưa — tránh goBack() do
+  // state "ended" từ callService cũ trước khi logic async chưa kịp chạy.
+  const hasCalledRef = useRef(false);
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
   const audioRefs = useRef<Record<string, HTMLAudioElement | null>>({});
@@ -226,6 +235,7 @@ export function GroupCallScreen({
               isVideo,
               isGroup: true,
             });
+            hasCalledRef.current = true; // BUG FIX: Đánh dấu đã khởi tạo thành công
             console.log("[GroupCallScreen] answerCall completed successfully");
           } else {
             console.log("[GroupCallScreen] Manual accept - waiting for user to click accept button", { autoAnswer, callId, hasOffer: !!offer });
@@ -238,6 +248,7 @@ export function GroupCallScreen({
             participantIds: participants.map((p) => p.userId),
             isVideo,
           });
+          hasCalledRef.current = true; // BUG FIX: Đánh dấu đã khởi tạo thành công
         }
       } catch (err) {
         console.error("[GroupCallScreen] Error during call initialization:", err);
@@ -255,6 +266,10 @@ export function GroupCallScreen({
 
   useEffect(() => {
     if (state !== "ended") return;
+    // BUG FIX: Chỉ navigate back nếu component đã khởi tạo xong (hasCalledRef = true).
+    // Nếu state = "ended" ngay khi mount (stale từ call trước), KHAI goBack()
+    // — sẽ chờ đến khi answerCall/startCall được gọi thì mới có hiệu lực.
+    if (!hasCalledRef.current) return;
     console.log("[GroupCallScreen] Call ended, will navigate back in 700ms");
     const t = window.setTimeout(goBack, 700);
     return () => window.clearTimeout(t);

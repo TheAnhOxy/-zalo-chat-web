@@ -67,7 +67,12 @@ export function CallScreen({
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
 
-  const [callState, setCallState] = useState<CallState>(callService.callState);
+  // BUG FIX: Không đọc trực tiếp callService.callState — có thể là stale "ended"
+  // từ cuộc gọi trước → useEffect goBack() chạy ngay khi component mount!
+  const [callState, setCallState] = useState<CallState>(() => {
+    const s = callService.callState;
+    return s === "ended" ? "idle" : s;
+  });
   const [muted, setMuted] = useState(false);
   const [videoOff, setVideoOff] = useState(false);
   const [speaker, setSpeaker] = useState(true);
@@ -76,6 +81,9 @@ export function CallScreen({
   const [initialized, setInitialized] = useState(false);
   const closingRef = useRef(false);
   const initializedRef = useRef(false);
+  // BUG FIX: chỉ goBack() sau khi call đã được khởi tạo — tránh navigate back
+  // ngay lập tức do stale state "ended" từ cuộc gọi trước.
+  const hasCalledRef = useRef(false);
 
   const connected = callState === "connected";
   const wasConnectedRef = useRef(false);
@@ -132,6 +140,9 @@ export function CallScreen({
 
   useEffect(() => {
     if (callState !== "ended") return;
+    // BUG FIX: Chỉ goBack() khi đã thực sự gọi được init (answerCall/startCall đã chạy)
+    // Tránh trường hợp state "ended" stale từ call trước khi component mới mount.
+    if (!hasCalledRef.current) return;
     const delay = wasConnectedRef.current ? 1200 : 400;
     const t = window.setTimeout(goBack, delay);
     return () => window.clearTimeout(t);
@@ -189,6 +200,7 @@ export function CallScreen({
               offer,
               isVideo,
             });
+            hasCalledRef.current = true; // BUG FIX: đánh dấu đã khởi tạo xong
           } else {
             setCallState("incoming");
           }
@@ -198,6 +210,7 @@ export function CallScreen({
             calleeId: peer.userId,
             isVideo,
           });
+          hasCalledRef.current = true; // BUG FIX: đánh dấu đã khởi tạo xong
         }
       } catch {
         if (!cancelled) setError("Không thể truy cập được micro/camera");

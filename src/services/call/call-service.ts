@@ -13,49 +13,68 @@ type IncomingListener = (data: IncomingCallPayload) => void;
 type ParticipantListener = (data: Record<string, unknown>) => void;
 type PeerStreamListener = (peerId: string, stream: MediaStream) => void;
 
-// Fallback ICE config (chỉ STUN) — dùng khi fetch backend thất bại
-// TURN credentials được cấp động bởi backend (TTL-based HMAC, không hardcode ở đây)
+// Fallback ICE config — có cả STUN và TURN (OpenRelay) để vẫn kết nối được khi backend fail
+// OpenRelay là công cộng, không ổn định — chỉ làm fallback kờ để tránh mất kết nối hoàn toàn
 const FALLBACK_ICE_CONFIG: RTCConfiguration = {
   iceServers: [
-    // STUN servers (giúp biết public IP)
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
     { urls: "stun:stun2.l.google.com:19302" },
-    { urls: "stun:stun3.l.google.com:19302" },
+    // TURN fallback — nếu backend fail, vẫn có TURN để xuyên NAT 4G
+    { urls: "turn:openrelay.metered.ca:80", username: "openrelayproject", credential: "openrelayproject" },
+    { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
+    { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
   ],
   iceCandidatePoolSize: 10,
 };
 
 /**
- * Lấy ICE config (bao gồm TURN credentials TTL-based) từ backend.
- * Backend sinh credential bằng HMAC-SHA1 theo chuẩn TURN REST API (RFC 8489 §9.2):
- *   username  = "<unix_expiry>:<userId>"
- *   credential = base64(HMAC-SHA1(TURN_SECRET, username))
- * TURN secret thật không bao giờ gửi xuống client.
- * Nếu fetch thất bại → dùng fallback STUN-only (P2P vẫn hoạt động trên nhiều mạng).
+ * Lấy ICE config từ backend.
+ * Đã có cơ chế retry 1 lần + timeout 5s để tránh treo.
+ * Fallback: STUN + TURN OpenRelay (vẫn kết nối được, ít ổn hơn Metered nhưng đủ dùng).
+ * 
+ * Lưu ý: Hàm này chỉ nên gọi 1 lần mỗi cuộc gọi và cache lại
+ * (xem cachedIceConfig trong CallService).
  */
-async function fetchIceConfig(userId: string): Promise<RTCConfiguration> {
-  try {
+async function fetchIceConfigOnce(userId: string): Promise<RTCConfiguration> {
+  const attempt = async (): Promise<RTCConfiguration> => {
     const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8081";
     const { getStoredTokens } = await import("@/src/utils/storage");
     const token = getStoredTokens()?.accessToken ?? "";
-    const res = await fetch(
-      `${baseUrl}/calls/ice-config?userId=${encodeURIComponent(userId)}`,
-      {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        // Không cache — credential có TTL, cần fresh mỗi lần gọi
-        cache: "no-store",
-      },
-    );
-    if (!res.ok) throw new Error(`ice-config HTTP ${res.status}`);
-    const body = (await res.json()) as { iceServers: RTCIceServer[] };
-    if (!Array.isArray(body?.iceServers) || body.iceServers.length === 0) {
-      throw new Error("ice-config response invalid");
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5000); // 5s timeout
+    try {
+      const res = await fetch(
+        `${baseUrl}/calls/ice-config?userId=${encodeURIComponent(userId)}`,
+        {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          cache: "no-store",
+          signal: controller.signal,
+        },
+      );
+      if (!res.ok) throw new Error(`ice-config HTTP ${res.status}`);
+      const body = (await res.json()) as { iceServers: RTCIceServer[] };
+      if (!Array.isArray(body?.iceServers) || body.iceServers.length === 0) {
+        throw new Error("ice-config response invalid");
+      }
+      return { iceServers: body.iceServers, iceCandidatePoolSize: 10 };
+    } finally {
+      window.clearTimeout(timeout);
     }
-    return { iceServers: body.iceServers, iceCandidatePoolSize: 10 };
-  } catch (err) {
-    console.warn("[ICE] fetch ice-config failed, fallback to STUN-only:", err);
-    return FALLBACK_ICE_CONFIG;
+  };
+
+  try {
+    return await attempt();
+  } catch (err1) {
+    console.warn("[ICE] fetch ice-config lần 1 thất bại, thử lại sau 1s:", err1);
+    // Retry 1 lần sau 1 giây (trường hợp mạng chậm hoặc server vừa khởi động)
+    await new Promise((r) => window.setTimeout(r, 1000));
+    try {
+      return await attempt();
+    } catch (err2) {
+      console.warn("[ICE] fetch ice-config thất bại sau 2 lần, dùng fallback có TURN:", err2);
+      return FALLBACK_ICE_CONFIG; // Fallback: STUN + TURN OpenRelay
+    }
   }
 }
 
@@ -111,6 +130,11 @@ class CallService {
   private pendingRejectConversationId: string | null = null;
   private pendingIncomingOffer: RTCSessionDescriptionInit | null = null;
   private pendingIncomingCallId: string | null = null;
+  // Cache ICE config cho toàn bộ 1 cuộc gọi — tránh fetch riêng cho mỗi peer.
+  // Trong group call có 3 người, nếu không cache sẽ fetch 3 lần riêng biệt
+  // → một số peer có TURN, một số không (fallback STUN) → kết nối lúc được lúc không!
+  private cachedIceConfig: RTCConfiguration | null = null;
+  private iceConfigFetchPromise: Promise<RTCConfiguration> | null = null;
 
   onIncomingCall: IncomingListener | null = null;
   onLocalStream: StreamListener | null = null;
@@ -421,6 +445,14 @@ class CallService {
       this.pendingIncomingCallId = payload.callId;
       sessionStorage.setItem(`pending_call_offer_${payload.callId}`, JSON.stringify(payload.offer));
     }
+    // BUG FIX: Reset stale "ended" state khi có incoming call mới.
+    // Sau khi 1 call kết thúc, state = "ended" và cleanup() KHÔNG reset về "idle"
+    // (vì guard: if (this.state !== "ended") this.state = "idle").
+    // Nếu không reset ở đây, GroupCallScreen sẽ mount với state = "ended"
+    // → useEffect sẽ ngay lập tức gọi goBack() → văng ra khỏi phòng.
+    if (this.state === "ended") {
+      this.state = "idle";
+    }
     if (!payload.isGroup) this.setState("incoming");
     this.onIncomingCall?.(payload);
   };
@@ -449,8 +481,16 @@ class CallService {
     try {
       const map = data as Record<string, unknown>;
       const responderId = getKey(String(map.responderId ?? map.sourceId ?? this.currentPeerId ?? ""));
-      const pc = this.findPeerConnection(responderId);
-      if (!pc) return;
+      // BUG FIX: Dùng findPeerConnectionEntry để lấy đúng actualKey trong Map.
+      // Code cũ: const key = responderId || "default" → sai khi responderId rỗng
+      // → peerHasRemoteDescription.set("default") và flushPendingIce("default", ...)
+      // → candidates được queue dưới key thật (userId) nhưng flush dưới "default" → KHÔNG flush!
+      const entry = this.findPeerConnectionEntry(responderId);
+      if (!entry) {
+        console.warn("[Call] call_answered: no PeerConnection for responderId:", responderId);
+        return;
+      }
+      const [actualKey, pc] = entry;
       const answerMap = map.answer as Record<string, unknown> | undefined;
       if (!answerMap) return;
       const answer: RTCSessionDescriptionInit = {
@@ -458,9 +498,9 @@ class CallService {
         type: (answerMap.type as RTCSdpType) ?? "answer",
       };
       await pc.setRemoteDescription(new RTCSessionDescription(answer));
-      const key = responderId || "default";
-      this.peerHasRemoteDescription.set(key, true);
-      await this.flushPendingIce(key, pc);
+      // Dùng actualKey (key thật trong Map) — đảm bảo flush đúng candidates
+      this.peerHasRemoteDescription.set(actualKey, true);
+      await this.flushPendingIce(actualKey, pc);
     } catch (e) {
       console.error("[Call] call_answered error:", e);
     }
@@ -472,14 +512,23 @@ class CallService {
       const targetId = getKey(String(map.targetId ?? ""));
       if (targetId && targetId !== getKey(this.userId)) return;
       const sourceId = getKey(String(map.sourceId ?? ""));
+      // peerId = người đã gửi candidate này (source)
       const peerId = sourceId || this.currentPeerId || "default";
       const candidate = toCandidate(map);
-      const pc = this.findPeerConnection(peerId);
-      if (!pc || !this.peerHasRemoteDescription.get(peerId)) {
-        this.pendingRemoteCandidates.set(peerId, [...(this.pendingRemoteCandidates.get(peerId) ?? []), candidate]);
+      // Dùng findPeerConnectionEntry để biết actualKey được dùng trong Map.
+      // ICE candidates được queue dưới peerId (sourceId), nhưng
+      // peerHasRemoteDescription được set dưới actualKey.
+      // Hai key này có thể khác nhau nếu fallback xảy ra.
+      const entry = this.findPeerConnectionEntry(peerId);
+      const actualKey = entry?.[1] ? (this.getKeyForPc(entry[1]) ?? peerId) : peerId;
+      if (!entry || !this.peerHasRemoteDescription.get(actualKey)) {
+        // Queue dưới peerId — sẽ flush khi setRemoteDescription xong (flushPendingIce)
+        const queue = this.pendingRemoteCandidates.get(peerId) ?? [];
+        queue.push(candidate);
+        this.pendingRemoteCandidates.set(peerId, queue);
         return;
       }
-      await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      await entry[1].addIceCandidate(new RTCIceCandidate(candidate));
     } catch (e) {
       console.error("[Call] ice_candidate error:", e);
     }
@@ -527,7 +576,13 @@ class CallService {
     this.onCallStarted?.(data as Record<string, unknown>);
   };
 
-  private onCallEnded = () => {
+  private onCallEnded = (data?: unknown) => {
+    // NOTE: Guard trước đây (forced/allLeft) đã được XÓA bật vì sai.
+    // Stale "ended" state (lý do thực sự gây văng khỏi phòng) đã được fix bằng:
+    //   - cleanup() luôn reset state = "idle"
+    //   - onIncomingCallEvent reset state khi call mới đến
+    //   - hasCalledRef guard trong GroupCallScreen/CallScreen
+    // Bây giờ: khi server gửi "call_ended" → luôn kết thúc call, bất kể group hay 1-1.
     this.cleanup();
     this.setState("ended");
   };
@@ -567,17 +622,63 @@ class CallService {
     this.onLocalStream?.(this.localStream);
   }
 
-  private findPeerConnection(peerId: string) {
+  /**
+   * Tìm [actualKey, PeerConnection] theo peerId.
+   * Trả về actualKey được dùng trong Map — cần thiết để flush đúng candidates.
+   * BUG FIX: Code cũ dùng `responderId || "default"` làm key → sai khi responderId rỗng.
+   */
+  private findPeerConnectionEntry(peerId: string): [string, RTCPeerConnection] | null {
     const key = getKey(peerId);
-    if (key && this.peerConnections.has(key)) return this.peerConnections.get(key) ?? null;
-    return this.peerConnections.values().next().value ?? null;
+    if (key && this.peerConnections.has(key)) return [key, this.peerConnections.get(key)!];
+    // 1-1 call: chỉ có 1 PC, an toàn trả về với KEY THẬT của nó
+    if (!this.isGroupCall && this.peerConnections.size === 1) {
+      const entries = [...this.peerConnections.entries()];
+      return entries[0] ?? null;
+    }
+    // Group call: không fallback — trả null để tránh routing sai
+    if (key) console.warn(`[WebRTC] findPeerConnectionEntry: "${key}" not found (${this.peerConnections.size} peers)`);
+    return null;
+  }
+
+  /** Reverse lookup: lấy key từ PeerConnection instance */
+  private getKeyForPc(pc: RTCPeerConnection): string | undefined {
+    for (const [k, v] of this.peerConnections) {
+      if (v === pc) return k;
+    }
+    return undefined;
+  }
+
+  /**
+   * Tìm PeerConnection theo peerId (backward compat).
+   * BUG FIX: Code cũ có fallback về PC đầu tiên trong Map nếu không tìm thấy peerId.
+   * Trong group call, fallback này có thể route ICE candidate tới SAI PeerConnection.
+   */
+  private findPeerConnection(peerId: string): RTCPeerConnection | null {
+    return this.findPeerConnectionEntry(peerId)?.[1] ?? null;
+  }
+
+  /**
+   * Lấy ICE config — cache dùng chung cho toàn bộ 1 cuộc gọi.
+   * BUG FIX: Trước đây mỗi createPeerConnection gọi fetchIceConfig() riêng.
+   * Trong group call 3 người → 3 fetch → nếu 1 fetch fail → peer đó STUN-only
+   * → kết nối khác mạng fail ngẫu nhiên. Bây giờ chỉ fetch 1 lần, share cho tất cả.
+   */
+  private getOrFetchIceConfig(): Promise<RTCConfiguration> {
+    if (this.cachedIceConfig) return Promise.resolve(this.cachedIceConfig);
+    if (!this.iceConfigFetchPromise) {
+      this.iceConfigFetchPromise = fetchIceConfigOnce(this.userId).then((cfg) => {
+        this.cachedIceConfig = cfg;
+        return cfg;
+      });
+    }
+    return this.iceConfigFetchPromise;
   }
 
   private async createPeerConnection(peerId: string, isVideo: boolean) {
     const key = getKey(peerId) || "default";
     if (this.peerConnections.has(key)) return this.peerConnections.get(key)!;
-    // Lấy ICE config với TURN credentials TTL-based từ backend
-    const iceConfig = await fetchIceConfig(this.userId);
+    // Dùng ICE config đã cache — đảm bảo TẤT CẢ peers trong 1 call dùng cùng config (đều có TURN)
+    const iceConfig = await this.getOrFetchIceConfig();
     const pc = new RTCPeerConnection(iceConfig);
     this.peerConnections.set(key, pc);
     this.peerHasRemoteDescription.set(key, false);
@@ -595,11 +696,45 @@ class CallService {
       });
     };
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "connected") {
+      const state = pc.connectionState;
+      console.log(`[WebRTC] Peer "${key}" connectionState: ${state}`);
+      if (state === "connected") {
         this.emitConnectedIfReady();
         if (this.state !== "connected") this.setState("connected");
-      } else if ((pc.connectionState === "disconnected" || pc.connectionState === "failed") && !this.isGroupCall) {
-        this.endCall();
+      } else if (state === "failed") {
+        if (!this.isGroupCall) {
+          // 1-1 call: kết thúc người dùng
+          this.endCall();
+        } else {
+          // Group call: thử ICE restart — chờ 2s trước retry
+          // ICE restart tạo offer mới với tham số iceRestart:true → reset ICE gathering
+          console.warn(`[WebRTC] Group peer "${key}" failed. Attempting ICE restart in 2s...`);
+          window.setTimeout(async () => {
+            // Kiểm tra: PC vẫn còn trong map và vẫn ở failed state
+            if (!this.peerConnections.has(key) || pc.connectionState !== "failed") return;
+            try {
+              const offer = await pc.createOffer({ iceRestart: true });
+              await pc.setLocalDescription(offer);
+              socketService.emit(SOCKET_CALL_CLIENT.callOffer, {
+                conversationId: this.currentConversationId,
+                callId: this.currentCallId,
+                targetId: key,
+                sourceId: this.userId,
+                offer: { sdp: offer.sdp, type: offer.type },
+              });
+              console.log(`[WebRTC] ICE restart offer sent to "${key}"`);
+            } catch (err) {
+              console.error(`[WebRTC] ICE restart failed for "${key}":`, err);
+            }
+          }, 2000);
+        }
+      } else if (state === "disconnected" && !this.isGroupCall) {
+        // 1-1: disconnected thường do mạng yếu, đợi thêm 5s rồi mới kết thúc
+        window.setTimeout(() => {
+          if (pc.connectionState === "disconnected" || pc.connectionState === "failed") {
+            this.endCall();
+          }
+        }, 5000);
       }
     };
     pc.ontrack = (event) => {
@@ -701,7 +836,14 @@ class CallService {
     this.callConnectedEmitted = false;
     this.pendingRejectBeforeCallId = false;
     this.pendingRejectConversationId = null;
-    if (this.state !== "ended") this.state = "idle";
+    // Reset ICE cache — cuộc gọi mới cần fetch ICE config mới (credentials có TTL)
+    this.cachedIceConfig = null;
+    this.iceConfigFetchPromise = null;
+    // BUG FIX: Luôn reset state về "idle" sau cleanup.
+    // Code cũ: if (this.state !== "ended") this.state = "idle"
+    // → Nếu state = "ended", KHÔNG reset → stale state tồn tại sang call tiếp theo
+    // → GroupCallScreen mount với state = "ended" → ngay lập tức goBack()!
+    this.state = "idle";
   }
 }
 
