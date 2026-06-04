@@ -80,8 +80,9 @@ export function ChatWindow({
     messages,
     loading,
     hasMore,
+    isFetchingNextPage,
     loadOlder,
-    loadInitial,
+    reload: loadInitial,
     sendText,
     sendWithAttachment,
     sendMediaCluster,
@@ -486,6 +487,7 @@ export function ChatWindow({
           locale={locale}
           hasMore={hasMore}
           loading={loading}
+          isFetchingNextPage={isFetchingNextPage}
           jumpToMessageId={jumpToMessageId}
           onLoadOlder={loadOlder}
           onReply={(m) => setUi({ replyToId: m._id, editingId: null })}

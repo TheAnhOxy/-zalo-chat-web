@@ -103,10 +103,10 @@ export class ChatSocket {
     };
 
     const recalled = (data: { messageId?: string; conversationId?: string }) => {
-      if (data?.messageId && data?.conversationId) {
+      if (data?.messageId) {
         this.handlers.onMessageRecalled?.({
           messageId: data.messageId,
-          conversationId: data.conversationId,
+          conversationId: data.conversationId || "",
         });
       }
     };
@@ -148,7 +148,7 @@ export class ChatSocket {
       [SOCKET_SERVER.stopTyping, stopTyping],
       [SOCKET_SERVER.userStatusChanged, presence],
       [SOCKET_SERVER.messageUpdated, updated],
-      [SOCKET_SERVER.messageDeleted, (...a) => recalled(a[0] as Parameters<typeof recalled>[0])],
+      [SOCKET_SERVER.messageRecalled, (...a) => recalled(a[0] as Parameters<typeof recalled>[0])],
       [SOCKET_SERVER.messagePinnedUpdate, pinnedUpdate as (...args: unknown[]) => void],
       [SOCKET_SERVER.conversationCallUpdated, conversationCallUpdated],
     ];

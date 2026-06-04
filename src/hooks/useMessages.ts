@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { conversationsApi } from "@/src/services/api/conversations";
 import { ChatSocket } from "@/src/services/socket/chat-socket";
 import { useChatStore, selectOrderedMessages } from "@/src/store/chat-store";
@@ -20,7 +20,7 @@ import {
   mediaClusterMetadata,
   serializeMediaClusterItems,
 } from "@/src/lib/media-cluster";
-import { useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 
 const PAGE_LIMIT = 50;
 
@@ -58,66 +58,85 @@ function buildCallMetaMessage(params: {
 export function useMessages(conversationId: string | undefined, currentUserId: string | undefined) {
   const queryClient = useQueryClient();
   const socketRef = useRef<ChatSocket | null>(null);
-  const slice = useChatStore((s) =>
-    conversationId ? s.messagesByConversation[conversationId] : undefined
-  );
 
-  const orderedMessages = conversationId ? selectOrderedMessages(conversationId) : [];
+  const queryKey = useMemo(() => ["messages", conversationId], [conversationId]);
 
-  const loadOlder = useCallback(async () => {
-    if (!conversationId || !currentUserId || !slice?.hasMore || slice.loading) return;
-    const nextSkip = slice.skip + PAGE_LIMIT;
-    useChatStore.getState().setMessagesSlice(conversationId, { loading: true, error: null });
-    try {
-      const page = await conversationsApi.getMessages(conversationId, currentUserId, {
-        limit: PAGE_LIMIT,
-        skip: nextSkip,
-      });
-      useChatStore.getState().upsertMessages(conversationId, [...page.messages, ...selectOrderedMessages(conversationId)]);
-      useChatStore.getState().setMessagesSlice(conversationId, {
-        loading: false,
-        skip: nextSkip,
-        hasMore: page.hasMore,
-      });
-      await setCachedMessages(conversationId, selectOrderedMessages(conversationId), nextSkip);
-    } catch (e) {
-      useChatStore.getState().setMessagesSlice(conversationId, {
-        loading: false,
-        error: e instanceof Error ? e.message : "Load failed",
-      });
-    }
-  }, [conversationId, currentUserId, slice?.hasMore, slice?.loading, slice?.skip]);
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+    refetch,
+  } = useInfiniteQuery({
+    queryKey,
+    queryFn: ({ pageParam }) =>
+      conversationsApi.getMessages(conversationId!, currentUserId!, {
+        limit: 30,
+        beforeMessageId: pageParam as string | undefined,
+      }),
+    getNextPageParam: (lastPage) =>
+      lastPage.hasMore && lastPage.messages.length > 0
+        ? lastPage.messages[lastPage.messages.length - 1]._id
+        : undefined,
+    enabled: !!conversationId && !!currentUserId,
+    refetchOnWindowFocus: false,
+  });
 
-  const loadInitial = useCallback(async () => {
-    if (!conversationId || !currentUserId) return;
-    useChatStore.getState().resetConversationMessages(conversationId);
-    useChatStore.getState().setMessagesSlice(conversationId, { loading: true });
+  const orderedMessages = useMemo(() => {
+    if (!data) return [];
+    // The backend returns pages with messages sorted DESC (newest first).
+    // We flatten them, then reverse so the oldest is at the top of the UI list.
+    const all = data.pages.flatMap((page) => page.messages);
+    return all.reverse();
+  }, [data]);
 
-    const cached = await getCachedMessages(conversationId);
-    if (cached?.messages.length) {
-      useChatStore.getState().upsertMessages(conversationId, cached.messages);
-      useChatStore.getState().setMessagesSlice(conversationId, { skip: cached.skip, hasMore: true });
-    }
+  const addMessageToCache = useCallback((msg: IMessage) => {
+    queryClient.setQueryData(queryKey, (old: any) => {
+      if (!old) return { pages: [{ messages: [msg], hasMore: false }], pageParams: [undefined] };
+      const firstPage = old.pages[0];
+      // Since pages hold newest first, we put the new message at index 0
+      return {
+        ...old,
+        pages: [
+          { ...firstPage, messages: [msg, ...firstPage.messages] },
+          ...old.pages.slice(1),
+        ],
+      };
+    });
+  }, [queryClient, queryKey]);
 
-    try {
-      const page = await conversationsApi.getMessages(conversationId, currentUserId, {
-        limit: PAGE_LIMIT,
-        skip: 0,
-      });
-      useChatStore.getState().upsertMessages(conversationId, page.messages);
-      useChatStore.getState().setMessagesSlice(conversationId, {
-        loading: false,
-        skip: 0,
-        hasMore: page.hasMore,
-      });
-      await setCachedMessages(conversationId, selectOrderedMessages(conversationId), 0);
-    } catch (e) {
-      useChatStore.getState().setMessagesSlice(conversationId, {
-        loading: false,
-        error: e instanceof Error ? e.message : "Load failed",
-      });
-    }
-  }, [conversationId, currentUserId]);
+  const updateMessageInCache = useCallback((messageId: string, updates: Partial<IMessage> | ((m: IMessage) => Partial<IMessage>)) => {
+    queryClient.setQueryData(queryKey, (old: any) => {
+      if (!old) return old;
+      return {
+        ...old,
+        pages: old.pages.map((page: any) => ({
+          ...page,
+          messages: page.messages.map((m: IMessage) => {
+            if (m._id === messageId || m.clientTempId === messageId) {
+              const appliedUpdates = typeof updates === "function" ? updates(m) : updates;
+              return { ...m, ...appliedUpdates };
+            }
+            return m;
+          })
+        }))
+      };
+    });
+  }, [queryClient, queryKey]);
+
+  const removeMessageFromCache = useCallback((messageId: string) => {
+    queryClient.setQueryData(queryKey, (old: any) => {
+      if (!old) return old;
+      return {
+        ...old,
+        pages: old.pages.map((page: any) => ({
+          ...page,
+          messages: page.messages.filter((m: IMessage) => m._id !== messageId && m.clientTempId !== messageId)
+        }))
+      };
+    });
+  }, [queryClient, queryKey]);
 
   const flushOfflineQueue = useCallback(() => {
     if (!conversationId || !currentUserId || !socketRef.current) return;
@@ -135,10 +154,7 @@ export function useMessages(conversationId: string | undefined, currentUserId: s
     }
   }, [conversationId, currentUserId]);
 
-  useEffect(() => {
-    if (!conversationId || !currentUserId) return;
-    void loadInitial();
-  }, [conversationId, currentUserId, loadInitial]);
+
 
   useEffect(() => {
     if (!conversationId || !currentUserId) return;
@@ -149,39 +165,56 @@ export function useMessages(conversationId: string | undefined, currentUserId: s
     chatSocket.setHandlers({
       onMessage: (msg) => {
         if (msg.conversationId !== conversationId) return;
-        const tempMatch = msg.clientTempId
-          ? useChatStore.getState().messagesByConversation[conversationId]?.byId[msg.clientTempId]
-          : undefined;
-        if (tempMatch?.clientTempId) {
-          useChatStore.getState().reconcileOptimistic(conversationId, tempMatch.clientTempId, msg);
-        } else {
-          useChatStore.getState().upsertMessage(conversationId, msg);
-        }
-        const skip = useChatStore.getState().messagesByConversation[conversationId]?.skip ?? 0;
-        void setCachedMessages(
-          conversationId,
-          selectOrderedMessages(conversationId),
-          skip
-        );
+        queryClient.setQueryData(queryKey, (old: any) => {
+           if (!old) return old;
+           let found = false;
+           const newPages = old.pages.map((page: any) => ({
+             ...page,
+             messages: page.messages.map((m: IMessage) => {
+                if (m._id === msg._id || (m.clientTempId && msg.clientTempId && m.clientTempId === msg.clientTempId)) {
+                   found = true;
+                   return { ...m, ...msg };
+                }
+                const isOptimistic = m.clientTempId && m._id === m.clientTempId;
+                if (!found && isOptimistic && m.senderId === msg.senderId && m.type === msg.type && JSON.stringify(m.content) === JSON.stringify(msg.content)) {
+                   found = true;
+                   return { ...m, ...msg, clientTempId: m.clientTempId };
+                }
+                return m;
+             })
+           }));
+           if (found) {
+             return { ...old, pages: newPages };
+           }
+           const firstPage = newPages[0] || { messages: [] };
+           return { ...old, pages: [{ ...firstPage, messages: [msg, ...firstPage.messages] }, ...newPages.slice(1)] };
+        });
       },
       onMessageSeen: ({ messageId, status, seenBy, userId }) => {
         const updates: Partial<IMessage> = {};
         if (status) updates.status = status;
-        if (seenBy?.length) updates.seenBy = seenBy;
-        else if (userId) {
-          const existing = useChatStore.getState().messagesByConversation[conversationId]?.byId[messageId];
-          if (existing) {
-            updates.seenBy = [...existing.seenBy, { userId, seenAt: new Date() }];
-            if (existing.senderId === currentUserId) updates.status = "SEEN";
+        
+        updateMessageInCache(messageId, (existing) => {
+          const res: Partial<IMessage> = { ...updates };
+          if (seenBy?.length) {
+            res.seenBy = seenBy;
+          } else if (userId && existing) {
+            const currentSeen = existing.seenBy || [];
+            if (!currentSeen.some((s) => s.userId === userId)) {
+               res.seenBy = [...currentSeen, { userId, seenAt: new Date() }];
+            }
+            if (existing.senderId === currentUserId) res.status = "SEEN";
           }
-        }
-        useChatStore.getState().updateMessage(conversationId, messageId, updates);
+          return res;
+        });
       },
       onMessageUpdated: (msg) => {
-        if (msg.conversationId === conversationId) useChatStore.getState().upsertMessage(conversationId, msg);
+        if (msg.conversationId === conversationId) {
+           updateMessageInCache(msg._id, msg);
+        }
       },
       onMessageRecalled: ({ messageId }) => {
-        useChatStore.getState().updateMessage(conversationId, messageId, { isRecalled: true });
+        updateMessageInCache(messageId, { isRecalled: true });
         queryClient.invalidateQueries({ queryKey: ["conversations", currentUserId] });
       },
       onMessagePinnedUpdate: ({ conversationId: cid }) => {
@@ -201,20 +234,27 @@ export function useMessages(conversationId: string | undefined, currentUserId: s
           callData,
           lastMessage,
         });
-        const sliceState = useChatStore.getState().messagesByConversation[conversationId];
-        const existingId = Object.values(sliceState?.byId ?? {}).find(
-          (m) => m.callId && m.callId === callMeta.callId
-        )?._id;
-        if (existingId) {
-          useChatStore.getState().updateMessage(conversationId, existingId, {
-            content: callMeta.content,
-            createdAt: callMeta.createdAt,
-            updatedAt: callMeta.updatedAt,
-            senderId: callMeta.senderId,
-          });
-        } else {
-          useChatStore.getState().upsertMessage(conversationId, callMeta);
-        }
+        
+        // Find existing call message
+        queryClient.setQueryData(queryKey, (old: any) => {
+           if (!old) return old;
+           let found = false;
+           const newPages = old.pages.map((page: any) => ({
+             ...page,
+             messages: page.messages.map((m: IMessage) => {
+               if (m.callId && m.callId === callMeta.callId) {
+                 found = true;
+                 return { ...m, content: callMeta.content, createdAt: callMeta.createdAt, updatedAt: callMeta.updatedAt, senderId: callMeta.senderId };
+               }
+               return m;
+             })
+           }));
+           if (!found) {
+             const firstPage = newPages[0] || { messages: [] };
+             return { ...old, pages: [{ ...firstPage, messages: [callMeta, ...firstPage.messages] }, ...newPages.slice(1)] };
+           }
+           return { ...old, pages: newPages };
+        });
       },
       onReconnect: () => {
         useChatStore.getState().setUi({ socketConnected: true });
@@ -253,7 +293,7 @@ export function useMessages(conversationId: string | undefined, currentUserId: s
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      useChatStore.getState().upsertMessage(conversationId, optimistic);
+      addMessageToCache(optimistic);
       useChatStore.getState().setUi({ replyToId: null });
 
       const payload = {
@@ -277,12 +317,12 @@ export function useMessages(conversationId: string | undefined, currentUserId: s
 
       try {
         socketRef.current?.sendMessage({ ...payload, clientTempId });
-        useChatStore.getState().updateMessage(conversationId, clientTempId, { status: "SENT" });
+        updateMessageInCache(clientTempId, { status: "SENT" });
       } catch {
-        useChatStore.getState().updateMessage(conversationId, clientTempId, { status: "FAILED" });
+        updateMessageInCache(clientTempId, { status: "FAILED" });
       }
     },
-    [conversationId, currentUserId]
+    [conversationId, currentUserId, addMessageToCache, updateMessageInCache]
   );
 
   const sendWithAttachment = useCallback(
@@ -306,7 +346,7 @@ export function useMessages(conversationId: string | undefined, currentUserId: s
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      useChatStore.getState().upsertMessage(conversationId, optimistic);
+      addMessageToCache(optimistic);
 
       try {
         const uploaded = await retryWithBackoff(() => uploadFile(file, { signal }));
@@ -324,16 +364,16 @@ export function useMessages(conversationId: string | undefined, currentUserId: s
           ...(replyTo ? { replyToId: replyTo } : {}),
           clientTempId,
         });
-        useChatStore.getState().updateMessage(conversationId, clientTempId, {
+        updateMessageInCache(clientTempId, {
           content: uploaded.url,
           metadata,
           status: "SENT",
         });
       } catch {
-        useChatStore.getState().updateMessage(conversationId, clientTempId, { status: "FAILED" });
+        updateMessageInCache(clientTempId, { status: "FAILED" });
       }
     },
-    [conversationId, currentUserId]
+    [conversationId, currentUserId, addMessageToCache, updateMessageInCache]
   );
 
   const sendMediaCluster = useCallback(
@@ -364,7 +404,7 @@ export function useMessages(conversationId: string | undefined, currentUserId: s
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      useChatStore.getState().upsertMessage(conversationId, optimistic);
+      addMessageToCache(optimistic);
 
       try {
         const clusterItems: IMediaClusterItem[] = [];
@@ -396,50 +436,50 @@ export function useMessages(conversationId: string | undefined, currentUserId: s
           clientTempId,
         });
 
-        useChatStore.getState().updateMessage(conversationId, clientTempId, {
+        updateMessageInCache(clientTempId, {
           content,
           metadata,
           status: "SENT",
         });
       } catch {
-        useChatStore.getState().updateMessage(conversationId, clientTempId, { status: "FAILED" });
+        updateMessageInCache(clientTempId, { status: "FAILED" });
         throw new Error("MEDIA_CLUSTER_UPLOAD_FAILED");
       }
     },
-    [conversationId, currentUserId]
+    [conversationId, currentUserId, addMessageToCache, updateMessageInCache]
   );
 
   const editMessage = useCallback(
     async (messageId: string, content: string) => {
       if (!conversationId) return;
       socketRef.current?.editMessage(messageId, content, conversationId);
-      useChatStore.getState().updateMessage(conversationId, messageId, { content, editedAt: new Date().toISOString() });
+      updateMessageInCache(messageId, { content, editedAt: new Date().toISOString() });
       useChatStore.getState().setUi({ editingId: null });
     },
-    [conversationId]
+    [conversationId, updateMessageInCache]
   );
 
   const recallMessage = useCallback(
     async (messageId: string) => {
       if (!conversationId) return;
       socketRef.current?.recallMessage(messageId, conversationId);
-      useChatStore.getState().updateMessage(conversationId, messageId, { isRecalled: true });
+      updateMessageInCache(messageId, { isRecalled: true });
       const editingId = useChatStore.getState().ui.editingId;
       if (editingId === messageId) useChatStore.getState().setUi({ editingId: null });
     },
-    [conversationId]
+    [conversationId, updateMessageInCache]
   );
 
   const deleteMessageForMe = useCallback(
     async (messageId: string) => {
       if (!conversationId || !currentUserId) return;
       socketRef.current?.deleteMessageForMe(messageId);
-      useChatStore.getState().removeMessage(conversationId, messageId);
+      removeMessageFromCache(messageId);
       const { replyToId, editingId } = useChatStore.getState().ui;
       if (replyToId === messageId) useChatStore.getState().setUi({ replyToId: null });
       if (editingId === messageId) useChatStore.getState().setUi({ editingId: null });
     },
-    [conversationId, currentUserId]
+    [conversationId, currentUserId, removeMessageFromCache]
   );
 
   const markSeen = useCallback(() => {
@@ -451,19 +491,19 @@ export function useMessages(conversationId: string | undefined, currentUserId: s
     async (message: IMessage) => {
       if (!conversationId || message.status !== "FAILED") return;
       const id = message.clientTempId || message._id;
-      useChatStore.getState().removeMessage(conversationId, id);
+      removeMessageFromCache(id);
       await sendText(message.content, message.replyTo);
     },
-    [conversationId, sendText]
+    [conversationId, sendText, removeMessageFromCache]
   );
 
   return {
     messages: orderedMessages,
-    loading: slice?.loading ?? false,
-    hasMore: slice?.hasMore ?? true,
-    error: slice?.error,
-    loadOlder,
-    loadInitial,
+    loading: isLoading,
+    hasMore: hasNextPage,
+    isFetchingNextPage,
+    loadOlder: fetchNextPage,
+    reload: refetch,
     sendText,
     sendWithAttachment,
     sendMediaCluster,

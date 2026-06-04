@@ -22,6 +22,9 @@ function asArray(data: unknown): unknown[] {
   if (data && typeof data === "object" && Array.isArray((data as { items?: unknown[] }).items)) {
     return (data as { items: unknown[] }).items;
   }
+  if (data && typeof data === "object" && Array.isArray((data as { messages?: unknown[] }).messages)) {
+    return (data as { messages: unknown[] }).messages;
+  }
   if (data && typeof data === "object" && Array.isArray((data as { results?: unknown[] }).results)) {
     return (data as { results: unknown[] }).results;
   }
@@ -74,23 +77,24 @@ export const conversationsApi = {
   getMessages(
     conversationId: string,
     userId: string,
-    options?: { limit?: number; skip?: number }
+    options?: { limit?: number; beforeMessageId?: string }
   ): Promise<MessagesPage> {
     const limit = options?.limit ?? DEFAULT_LIMIT;
-    const skip = options?.skip ?? 0;
+    const beforeMessageId = options?.beforeMessageId;
 
     return apiClient
       .get<unknown>(`/messages/conversation/${conversationId}`, {
-        params: { userId, limit, skip },
+        params: { userId, limit, beforeMessageId },
       })
       .then((res) => {
-        const list = asArray(res.data).map((item) =>
+        const payload = res.data as any;
+        const list = asArray(payload?.data || payload).map((item) =>
           parseMessageFromApi(item as Record<string, unknown>)
         );
         return {
           messages: list,
-          skip,
-          hasMore: list.length >= limit,
+          skip: 0,
+          hasMore: payload?.hasMore ?? payload?.metadata?.hasMore ?? (list.length >= limit),
         };
       });
   },
