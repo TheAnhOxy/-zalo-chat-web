@@ -152,7 +152,9 @@ export function parseConversationFromApi(raw: Record<string, unknown>): IConvers
           type: (lastCallRaw.type ?? "VOICE") as ICall["type"],
           status: (lastCallRaw.status ?? "CALLING") as ICall["status"],
           duration: Number(lastCallRaw.duration ?? 0),
-          createdAt: lastCallRaw.createdAt ? String(lastCallRaw.createdAt) : new Date().toISOString(),
+          createdAt: lastCallRaw.createdAt
+            ? new Date(String(lastCallRaw.createdAt))
+            : new Date(),
           endedAt: lastCallRaw.endedAt ? new Date(String(lastCallRaw.endedAt)) : undefined,
         }
       : undefined,
