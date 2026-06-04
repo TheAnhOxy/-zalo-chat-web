@@ -2,11 +2,20 @@ export type MessageType =
   | 'TEXT'
   | 'IMAGE'
   | 'VIDEO'
+  | 'MEDIA_CLUSTER'
   | 'FILE'
   | 'VOICE'
   | 'LOCATION'
   | 'CONTACT'
   | 'SYSTEM';
+
+export type MediaClusterItemType = 'IMAGE' | 'VIDEO';
+
+export interface IMediaClusterItem {
+  url: string;
+  type: MediaClusterItemType;
+  thumbnail?: string;
+}
 export type MessageStatus = 'SENDING' | 'SENT' | 'DELIVERED' | 'SEEN' | 'FAILED';
 export type ReactionType = 'LIKE' | 'LOVE' | 'HAHA' | 'WOW' | 'SAD' | 'ANGRY';
 
@@ -19,6 +28,7 @@ export interface IMessageMetadata {
   lng?: number;
   duration?: number;
   groupId?: string;
+  mediaItems?: IMediaClusterItem[];
 }
 
 export interface IReaction {

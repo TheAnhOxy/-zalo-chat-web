@@ -1,5 +1,6 @@
 import { IConversation, IConversationParticipant, IGroupSettings } from "@/src/types/conversation";
 import { IMessage, IReaction, ISeenBy, MessageType } from "@/src/types/message";
+import { ICall } from "@/src/types/call";
 import { IUserPresence } from "@/src/types/presence";
 import { normalizeMessage } from "@/src/lib/messages";
 
@@ -86,6 +87,7 @@ export function parseConversationFromApi(raw: Record<string, unknown>): IConvers
 
   const type = String(raw.type ?? "PRIVATE") as IConversation["type"];
   const lastMessageRaw = raw.lastMessage as Record<string, unknown> | undefined;
+  const lastCallRaw = raw.lastCall as Record<string, unknown> | undefined;
 
   let pinnedMessages: IMessage[] = [];
   let pinnedMessageIds: string[] = [];
@@ -141,6 +143,17 @@ export function parseConversationFromApi(raw: Record<string, unknown>): IConvers
           type: (lastMessageRaw.messageType ?? lastMessageRaw.type ?? "TEXT") as IMessage["type"],
           senderId: String(lastMessageRaw.senderId ?? ""),
           createdAt: lastMessageRaw.createdAt ? String(lastMessageRaw.createdAt) : new Date().toISOString(),
+        }
+      : undefined,
+    lastCall: lastCallRaw
+      ? {
+          _id: extractMongoId(lastCallRaw._id ?? lastCallRaw.id),
+          callerId: String(lastCallRaw.callerId ?? ""),
+          type: (lastCallRaw.type ?? "VOICE") as ICall["type"],
+          status: (lastCallRaw.status ?? "CALLING") as ICall["status"],
+          duration: Number(lastCallRaw.duration ?? 0),
+          createdAt: lastCallRaw.createdAt ? String(lastCallRaw.createdAt) : new Date().toISOString(),
+          endedAt: lastCallRaw.endedAt ? new Date(String(lastCallRaw.endedAt)) : undefined,
         }
       : undefined,
     unreadCount: Number(raw.unreadCount ?? 0),

@@ -8,8 +8,8 @@ interface MessageHoverToolbarProps {
   dotsOnEnd?: boolean;
   moreActive?: boolean;
   onMore: () => void;
-  onReply: () => void;
-  onReaction: () => void;
+  onReply?: () => void;
+  onReaction?: () => void;
 }
 
 const iconBtn =
@@ -27,7 +27,11 @@ export function MessageHoverToolbar({
     <div
       className={`flex shrink-0 items-center gap-1 transition-opacity duration-150 ${
         dotsOnEnd ? "flex-row-reverse" : "flex-row"
-      } ${visible || moreActive ? "opacity-100" : "pointer-events-none opacity-0"}`}
+      } ${
+        visible || moreActive
+          ? "opacity-100"
+          : "pointer-events-none opacity-0 max-sm:pointer-events-auto max-sm:opacity-90"
+      }`}
     >
       <button
         type="button"
@@ -41,28 +45,32 @@ export function MessageHoverToolbar({
       >
         <MoreVertical className="h-[18px] w-[18px]" strokeWidth={2} />
       </button>
-      <button
-        type="button"
-        className={iconBtn}
-        aria-label="Trả lời"
-        onClick={(e) => {
-          e.stopPropagation();
-          onReply();
-        }}
-      >
-        <Reply className="h-[18px] w-[18px]" strokeWidth={2} />
-      </button>
-      <button
-        type="button"
-        className={iconBtn}
-        aria-label="Cảm xúc"
-        onClick={(e) => {
-          e.stopPropagation();
-          onReaction();
-        }}
-      >
-        <Smile className="h-[18px] w-[18px]" strokeWidth={2} />
-      </button>
+      {onReply && (
+        <button
+          type="button"
+          className={iconBtn}
+          aria-label="Trả lời"
+          onClick={(e) => {
+            e.stopPropagation();
+            onReply();
+          }}
+        >
+          <Reply className="h-[18px] w-[18px]" strokeWidth={2} />
+        </button>
+      )}
+      {onReaction && (
+        <button
+          type="button"
+          className={iconBtn}
+          aria-label="Cảm xúc"
+          onClick={(e) => {
+            e.stopPropagation();
+            onReaction();
+          }}
+        >
+          <Smile className="h-[18px] w-[18px]" strokeWidth={2} />
+        </button>
+      )}
     </div>
   );
 }

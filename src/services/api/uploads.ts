@@ -17,6 +17,11 @@ function pickString(raw: Record<string, unknown>, keys: string[]): string | unde
   return undefined;
 }
 
+export function resolveFileContentType(file: File): string {
+  if (file.type?.trim()) return file.type;
+  return detectContentType(file.name);
+}
+
 function detectContentType(fileName: string): string {
   const lower = fileName.toLowerCase();
   if (lower.endsWith(".png")) return "image/png";
@@ -73,7 +78,7 @@ export async function uploadFile(
     preferPresigned?: boolean;
   }
 ): Promise<UploadResult> {
-  const contentType = file.type || detectContentType(file.name);
+  const contentType = resolveFileContentType(file);
 
   if (options?.preferPresigned) {
     try {
@@ -94,6 +99,17 @@ export async function uploadFile(
 
   const url = await uploadViaBackend(file, options?.onProgress, options?.signal);
   return { url, fileName: file.name, fileSize: file.size, mimeType: contentType };
+}
+
+/** Upload qua presigned URL (S3) — dùng cho cụm ảnh/video. */
+export async function uploadFileViaPresigned(
+  file: File,
+  options?: {
+    onProgress?: (percent: number) => void;
+    signal?: AbortSignal;
+  }
+): Promise<UploadResult> {
+  return uploadFile(file, { ...options, preferPresigned: true });
 }
 
 export function retryWithBackoff<T>(fn: () => Promise<T>, maxAttempts = 3, baseMs = 500): Promise<T> {

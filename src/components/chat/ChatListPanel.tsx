@@ -65,16 +65,60 @@ function buildListItem(
   const isGroup = conversation.type === "GROUP";
   const name = getConversationDisplayName(conversation, currentUserId, profiles);
 
-  let lastMessage = `Xin chào, ${name.trim() || "bạn"}`;
-  if (conversation.lastMessage) {
-    lastMessage = formatLastMessagePreview(conversation.lastMessage.content, {
-      type: conversation.lastMessage.type,
-      senderId: conversation.lastMessage.senderId,
+  const lastMessage = conversation.lastMessage;
+  const lastCall = conversation.lastCall;
+
+  let timeSource = conversation.updatedAt;
+  let preview = `Xin chào, ${name.trim() || "bạn"}`;
+  
+  const msgTime = lastMessage?.createdAt ? new Date(lastMessage.createdAt).getTime() : 0;
+  const callTime = lastCall?.createdAt ? new Date(lastCall.createdAt).getTime() : 0;
+
+  let isMissedCall = false;
+
+  if (callTime > msgTime && lastCall) {
+    timeSource = lastCall.createdAt;
+    const isMine = lastCall.callerId === currentUserId;
+    const isVideo = lastCall.type === "VIDEO";
+    const missed = lastCall.status === "MISSED" || lastCall.status === "REJECTED" || (lastCall.status === "ENDED" && lastCall.duration === 0);
+    const isMissedForReceiver = !isMine && missed;
+    
+    if (lastCall.status === "CALLING") {
+      preview = isGroup ? "Đang có cuộc gọi nhóm" : `Đang gọi ${isVideo ? "video" : "thoại"}`;
+    } else if (isMine) {
+      preview = missed 
+        ? `Cuộc gọi ${isVideo ? "video" : "thoại"} không được trả lời`
+        : `Cuộc gọi ${isVideo ? "video" : "thoại"}`;
+    } else if (isMissedForReceiver) {
+      preview = "Cuộc gọi nhỡ";
+      isMissedCall = true;
+    } else {
+      preview = `Cuộc gọi ${isVideo ? "video" : "thoại"}`;
+    }
+    
+    if (isMine) {
+      preview = `Bạn: ${preview}`;
+    } else if (isGroup && !isMissedForReceiver) {
+      const callerName = profiles[lastCall.callerId]?.fullName || "Ai đó";
+      preview = `${callerName}: ${preview}`;
+    }
+  } else if (lastMessage) {
+    timeSource = lastMessage.createdAt;
+    
+    let senderName: string | undefined;
+    if (isGroup && lastMessage.senderId !== currentUserId) {
+      senderName = profiles[lastMessage.senderId]?.fullName || "Ai đó";
+    }
+
+    preview = formatLastMessagePreview(lastMessage.content, {
+      type: lastMessage.type,
+      senderId: lastMessage.senderId,
       currentUserId,
+      senderName,
     });
+    isMissedCall = preview.toLowerCase().includes("cuộc gọi nhỡ");
   }
 
-  const timeSource = conversation.lastMessage?.createdAt ?? conversation.updatedAt;
   const sortTimestamp = new Date(timeSource).getTime();
   const otherId = other?.userId;
 
@@ -84,8 +128,8 @@ function buildListItem(
     avatar: getConversationAvatarUrl(conversation, currentUserId, profiles),
     otherId,
     isGroup,
-    lastMessage,
-    isMissedCall: lastMessage.toLowerCase().includes("cuộc gọi nhỡ"),
+    lastMessage: preview,
+    isMissedCall,
     time: formatChatTime(timeSource),
     sortTimestamp: Number.isNaN(sortTimestamp) ? 0 : sortTimestamp,
     unreadCount: conversation.unreadCount,

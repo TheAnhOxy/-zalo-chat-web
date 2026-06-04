@@ -1,4 +1,5 @@
 import { IMessage, MessageType } from "@/src/types/message";
+import { ICall } from "@/src/types/call";
 
 /** Matches mobile ConversationModel.type: PRIVATE | GROUP */
 export type ConversationType = "PRIVATE" | "GROUP";
@@ -34,6 +35,7 @@ export interface IConversation {
   avatar?: string;
   participants: IConversationParticipant[];
   lastMessage?: Pick<IMessage, "_id" | "content" | "type" | "senderId" | "createdAt">;
+  lastCall?: Pick<ICall, "_id" | "callerId" | "type" | "status" | "duration" | "createdAt" | "endedAt">;
   unreadCount: number;
   updatedAt: string | Date;
   createdAt: string | Date;

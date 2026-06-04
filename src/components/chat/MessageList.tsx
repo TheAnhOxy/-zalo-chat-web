@@ -4,7 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { IMessage, ReactionType } from "@/src/types/message";
 import { ICall } from "@/src/types/call";
-import { groupMessagesForList, messageMatchesSearch, MessageGroupItem } from "@/src/lib/messages";
+import {
+  estimateMessageListRowHeight,
+  groupMessagesForList,
+  messageMatchesSearch,
+  MessageGroupItem,
+} from "@/src/lib/messages";
 import { MessageItem } from "@/src/components/chat/MessageItem";
 import { t, ChatLocale } from "@/src/lib/i18n/chat";
 import { useChatStore } from "@/src/store/chat-store";
@@ -16,6 +21,7 @@ import { formatChatTime } from "@/src/lib/date-utils";
 import { Phone, PhoneMissed, Video, VideoOff } from "lucide-react";
 
 interface MessageListProps {
+  conversationId: string;
   messages: IMessage[];
   calls?: ICall[];
   currentUserId: string;
@@ -31,7 +37,7 @@ interface MessageListProps {
   onEdit: (message: IMessage) => void;
   onDeleteForMe: (messageId: string) => void;
   onRecall: (messageId: string) => void;
-  onForward: (messageId: string) => void;
+  onForward: (messageIds: string[]) => void;
   /** Chỉ chat 1-1 có Sửa trong menu (mobile) */
   allowEdit?: boolean;
   onReact: (messageId: string, type: ReactionType) => void;
@@ -47,6 +53,7 @@ type ChatItem =
   | ({ kind: "call" } & { call: ICall; key: string; createdAt: Date; showAvatar: boolean; isMine: boolean });
 
 export function MessageList({
+  conversationId,
   messages,
   calls = [],
   currentUserId,
@@ -72,6 +79,8 @@ export function MessageList({
   onViewAllPinned,
 }: MessageListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const initialScrollDoneRef = useRef(false);
+  const prevConversationRef = useRef<string | null>(null);
   const setUi = useChatStore((s) => s.setUi);
   const isAtBottom = useChatStore((s) => s.ui.isAtBottom);
 
@@ -125,9 +134,6 @@ export function MessageList({
       if (item.kind === "message") {
         return messageMatchesSearch(item.message, searchQuery);
       }
-      if (item.kind === "mediaGroup") {
-        return item.messages.some((m) => messageMatchesSearch(m, searchQuery));
-      }
       if (item.kind === "system") {
         return formatSystemMessageText(item.message)
           .toLowerCase()
@@ -158,9 +164,6 @@ export function MessageList({
       if (item.kind === "call") return item.createdAt.getTime();
       if (item.kind === "system") return new Date(item.message.createdAt).getTime();
       if (item.kind === "message") return new Date(item.message.createdAt).getTime();
-      if (item.kind === "mediaGroup") {
-        return new Date(item.messages[item.messages.length - 1].createdAt).getTime();
-      }
       if (item.kind === "date") return 0;
       return 0;
     };
@@ -193,9 +196,7 @@ export function MessageList({
           ? item.call.callerId
           : item.kind === "message"
             ? item.message.senderId
-            : item.kind === "mediaGroup"
-              ? item.messages[0].senderId
-              : "";
+            : "";
 
       if (item.kind === "call") {
         const isMine = item.call.callerId === currentUserId;
@@ -220,11 +221,24 @@ export function MessageList({
 
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
 
+  const estimateRowSize = useCallback(
+    (index: number) => {
+      const item = groups[index];
+      if (!item || item.kind === "call") return 96;
+      if (item.kind === "date" || item.kind === "system" || item.kind === "message") {
+        return estimateMessageListRowHeight(item);
+      }
+      return 72;
+    },
+    [groups]
+  );
+
   const rowVirtualizer = useVirtualizer({
     count: groups.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 72,
-    overscan: 8,
+    estimateSize: estimateRowSize,
+    overscan: 10,
+    getItemKey: (index) => groups[index]?.key ?? index,
   });
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
@@ -232,12 +246,29 @@ export function MessageList({
     rowVirtualizer.scrollToIndex(groups.length - 1, { align: "end", behavior });
   }, [groups.length, rowVirtualizer]);
 
+  const remeasureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const remeasureRows = useCallback(() => {
+    if (remeasureTimerRef.current) clearTimeout(remeasureTimerRef.current);
+    remeasureTimerRef.current = setTimeout(() => {
+      rowVirtualizer.measure();
+      if (useChatStore.getState().ui.isAtBottom) {
+        scrollToBottom("auto");
+      }
+    }, 80);
+  }, [rowVirtualizer, scrollToBottom]);
+
+  useEffect(
+    () => () => {
+      if (remeasureTimerRef.current) clearTimeout(remeasureTimerRef.current);
+    },
+    []
+  );
+
   const handleJumpToMessage = useCallback(
     (messageId: string) => {
       const index = allGroups.findIndex(
         (item) =>
-          (item.kind === "message" && item.message._id === messageId) ||
-          (item.kind === "mediaGroup" && item.messages.some((m) => m._id === messageId))
+          item.kind === "message" && item.message._id === messageId
       );
       if (index === -1) return;
       if (searchQuery) {
@@ -257,8 +288,30 @@ export function MessageList({
   }, [jumpToMessageId, handleJumpToMessage]);
 
   useEffect(() => {
+    if (prevConversationRef.current !== conversationId) {
+      prevConversationRef.current = conversationId;
+      initialScrollDoneRef.current = false;
+      setUi({ isAtBottom: true });
+    }
+  }, [conversationId, setUi]);
+
+  useEffect(() => {
+    if (loading || !groups.length || initialScrollDoneRef.current) return;
+    initialScrollDoneRef.current = true;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        rowVirtualizer.scrollToIndex(groups.length - 1, { align: "end", behavior: "auto" });
+      });
+    });
+  }, [conversationId, loading, groups.length, rowVirtualizer]);
+
+  useEffect(() => {
     if (isAtBottom) scrollToBottom("auto");
   }, [messages.length, isAtBottom, scrollToBottom]);
+
+  useEffect(() => {
+    remeasureRows();
+  }, [groups.length, conversationId, remeasureRows]);
 
   const handleScroll = useCallback(() => {
     const el = parentRef.current;
@@ -319,6 +372,13 @@ export function MessageList({
         >
           {rowVirtualizer.getVirtualItems().map((virtualRow) => {
             const item = groups[virtualRow.index];
+            const prevItem = virtualRow.index > 0 ? groups[virtualRow.index - 1] : null;
+            const isStackedMedia =
+              item.kind === "message" &&
+              prevItem?.kind === "message" &&
+              prevItem.message.senderId === item.message.senderId &&
+              (prevItem.message.type === "IMAGE" || prevItem.message.type === "VIDEO") &&
+              (item.message.type === "IMAGE" || item.message.type === "VIDEO");
             return (
               <div
                 key={item.key}
@@ -332,7 +392,7 @@ export function MessageList({
                   maxWidth: "100%",
                   transform: `translateY(${virtualRow.start}px)`,
                 }}
-                className="max-w-full overflow-x-hidden"
+                className="max-w-full overflow-x-hidden pb-1"
               >
                 {item.kind === "date" ? (
                   <div className="my-3 text-center text-xs text-gray-500" role="separator">
@@ -343,68 +403,17 @@ export function MessageList({
                     message={item.message}
                     onViewAllPinned={onViewAllPinned}
                   />
-                ) : item.kind === "mediaGroup" ? (
-                  <div className={`flex max-w-full min-w-0 gap-2 overflow-hidden px-3 py-0.5 ${item.isMine ? "flex-row-reverse" : "flex-row"}`}>
-                    {!item.isMine && item.showAvatar && (
-                      <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full bg-zalo-light">
-                        {participantMap[item.messages[0].senderId]?.avatar ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={participantMap[item.messages[0].senderId]?.avatar} alt="" className="h-full w-full object-cover" />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center text-xs font-semibold text-white" aria-hidden>
-                            {participantMap[item.messages[0].senderId]?.name?.charAt(0).toUpperCase() || "?"}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {!item.isMine && !item.showAvatar && <div className="w-8 shrink-0" aria-hidden />}
-                    
-                    <div className={`grid gap-1 max-w-[75%] sm:max-w-[65%] ${item.messages.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}>
-                      {item.messages.map((m) => (
-                        <div key={m._id} className="relative">
-                          <MessageItem
-                            message={m}
-                            isMine={item.isMine}
-                            showAvatar={false}
-                            hideAvatarSpace={true}
-                            fullWidth={true}
-                            avatar={participantMap[m.senderId]?.avatar}
-                            senderName={participantMap[m.senderId]?.name}
-                            locale={locale}
-                            isHighlighted={highlightedId === m._id}
-                            onJumpToReply={m.replyTo ? () => handleJumpToMessage(m.replyTo!) : undefined}
-                            onReply={() => onReply(m)}
-                            onEdit={
-                              allowEdit && item.isMine ? () => onEdit(m) : undefined
-                            }
-                            onDeleteForMe={() => onDeleteForMe(m._id)}
-                            onRecall={() => onRecall(m._id)}
-                            onForward={() => onForward(m._id)}
-                            currentUserId={currentUserId}
-                            onReact={(type) => onReact(m._id, type)}
-                            onRemoveReaction={
-                              onRemoveReaction ? () => onRemoveReaction(m._id) : undefined
-                            }
-                            onRetry={() => onRetry(m)}
-                            isPinned={pinnedIdSet.has(m._id)}
-                            onPin={onPin && !pinnedIdSet.has(m._id) ? () => onPin(m._id) : undefined}
-                            onUnpin={onUnpin && pinnedIdSet.has(m._id) ? () => onUnpin(m._id) : undefined}
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
                 ) : item.kind === "message" ? (
                   <MessageItem
+                    onMediaLoad={remeasureRows}
+                    stackedMedia={isStackedMedia}
                     message={item.message}
                     isMine={item.isMine}
                     showAvatar={item.showAvatar}
                     avatar={participantMap[item.message.senderId]?.avatar}
                     senderName={participantMap[item.message.senderId]?.name}
-                    replyPreview={
-                      item.message.replyTo
-                        ? replyMap[item.message.replyTo]?.content?.slice(0, 80)
-                        : undefined
+                    replyMessage={
+                      item.message.replyTo ? replyMap[item.message.replyTo] ?? null : null
                     }
                     locale={locale}
                     isHighlighted={highlightedId === item.message._id}
@@ -415,7 +424,7 @@ export function MessageList({
                     }
                     onDeleteForMe={() => onDeleteForMe(item.message._id)}
                     onRecall={() => onRecall(item.message._id)}
-                    onForward={() => onForward(item.message._id)}
+                    onForward={() => onForward([item.message._id])}
                     currentUserId={currentUserId}
                     onReact={(type) => onReact(item.message._id, type)}
                     onRemoveReaction={

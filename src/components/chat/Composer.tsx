@@ -5,8 +5,11 @@ import { Send, Square, Trash, ThumbsUp, Smile, PlusCircle } from "lucide-react";
 import { EmojiPicker } from "@/src/components/chat/EmojiPicker";
 import { t, ChatLocale } from "@/src/lib/i18n/chat";
 import { AttachmentPicker } from "@/src/components/chat/AttachmentPicker";
+import { AttachmentUploadPreview } from "@/src/components/chat/AttachmentUploadPreview";
+import { MessagePreviewSnippet } from "@/src/components/chat/MessagePreviewSnippet";
 import { AttachmentUploadState } from "@/src/hooks/useAttachments";
 import { IMessage } from "@/src/types/message";
+import { plainTextFromHtml } from "@/src/lib/sanitize";
 import { useVoiceRecorder } from "@/src/hooks/useVoiceRecorder";
 
 interface ComposerProps {
@@ -85,14 +88,26 @@ export function Composer({
   return (
     <footer className="shrink-0 border-t border-[var(--qc-divider)] bg-[var(--qc-card)]">
       {(replyTo || editingMessage) && (
-        <div className="flex items-center justify-between border-b border-[var(--qc-divider)] bg-[var(--qc-primary-light)]/50 px-3 py-2 text-xs text-[var(--qc-text-primary)]">
-          <span className="truncate">
-            {editingMessage ? t("edit", locale) : t("reply", locale)}:{" "}
-            {(replyTo ?? editingMessage)?.content?.slice(0, 60)}
-          </span>
+        <div className="flex items-center gap-2 border-b border-[var(--qc-divider)] bg-[var(--qc-primary-light)]/50 px-3 py-2 text-xs text-[var(--qc-text-primary)]">
+          <div className="min-w-0 flex-1">
+            <p className="mb-0.5 font-medium text-[var(--qc-primary)]">
+              {editingMessage ? t("edit", locale) : t("reply", locale)}
+            </p>
+            {editingMessage && editingMessage.type === "TEXT" ? (
+              <span className="line-clamp-2 text-[var(--qc-text-secondary)]">
+                {plainTextFromHtml(editingMessage.content).slice(0, 120)}
+              </span>
+            ) : (replyTo ?? editingMessage) ? (
+              <MessagePreviewSnippet
+                message={(replyTo ?? editingMessage)!}
+                locale={locale}
+                variant="compact"
+              />
+            ) : null}
+          </div>
           <button
             type="button"
-            className="text-gray-500 hover:text-gray-800"
+            className="shrink-0 rounded-full p-1 text-gray-500 hover:bg-black/5 hover:text-gray-800"
             onClick={editingMessage ? onCancelEdit : onCancelReply}
             aria-label={t("cancel", locale)}
           >
@@ -100,6 +115,12 @@ export function Composer({
           </button>
         </div>
       )}
+
+      <AttachmentUploadPreview
+        uploads={uploads}
+        locale={locale}
+        onCancel={onCancelUpload}
+      />
 
       <EmojiPicker
         open={showEmoji && !isRecording}
@@ -133,9 +154,7 @@ export function Composer({
             <AttachmentPicker
             locale={locale}
             disabled={disabled}
-            uploads={uploads}
             onFilesSelected={onFilesSelected}
-            onCancelUpload={onCancelUpload}
             onVoiceRecordClick={() => {
               if (onVoiceRecorded) void startRecording();
             }}
