@@ -17,6 +17,7 @@ type PeerStreamListener = (peerId: string, stream: MediaStream) => void;
 // TURN credentials được cấp động bởi backend (TTL-based HMAC, không hardcode ở đây)
 const FALLBACK_ICE_CONFIG: RTCConfiguration = {
   iceServers: [
+    // STUN servers (giúp biết public IP)
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
     { urls: "stun:stun2.l.google.com:19302" },
