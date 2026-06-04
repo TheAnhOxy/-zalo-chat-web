@@ -13,38 +13,51 @@ type IncomingListener = (data: IncomingCallPayload) => void;
 type ParticipantListener = (data: Record<string, unknown>) => void;
 type PeerStreamListener = (peerId: string, stream: MediaStream) => void;
 
-// ICE Servers: STUN dùng để discover public IP,
-// TURN dùng để RELAY media khi 2 peer ở sau NAT khác nhau (bắt buộc cho kết nối qua internet).
-// Để dùng TURN server riêng: thay url/username/credential bên dưới.
-// Free TURN: https://www.metered.ca/tools/openrelay/ hoặc Cloudflare TURN (có phí)
-const ICE_SERVERS: RTCConfiguration = {
+// Fallback ICE config (chỉ STUN) — dùng khi fetch backend thất bại
+// TURN credentials được cấp động bởi backend (TTL-based HMAC, không hardcode ở đây)
+const FALLBACK_ICE_CONFIG: RTCConfiguration = {
   iceServers: [
     // STUN servers (giúp biết public IP)
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
     { urls: "stun:stun2.l.google.com:19302" },
     { urls: "stun:stun3.l.google.com:19302" },
-    // TURN servers (relay khi P2P không thể kết nối trực tiếp qua NAT)
-    // Dùng OpenRelay free TURN server — thay bằng TURN server riêng cho production
-    {
-      urls: "turn:openrelay.metered.ca:80",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
-    {
-      urls: "turn:openrelay.metered.ca:443",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
-    {
-      urls: "turn:openrelay.metered.ca:443?transport=tcp",
-      username: "openrelayproject",
-      credential: "openrelayproject",
-    },
   ],
-  // Ưu tiên dùng relay khi các candidate type khác thất bại
   iceCandidatePoolSize: 10,
 };
+
+/**
+ * Lấy ICE config (bao gồm TURN credentials TTL-based) từ backend.
+ * Backend sinh credential bằng HMAC-SHA1 theo chuẩn TURN REST API (RFC 8489 §9.2):
+ *   username  = "<unix_expiry>:<userId>"
+ *   credential = base64(HMAC-SHA1(TURN_SECRET, username))
+ * TURN secret thật không bao giờ gửi xuống client.
+ * Nếu fetch thất bại → dùng fallback STUN-only (P2P vẫn hoạt động trên nhiều mạng).
+ */
+async function fetchIceConfig(userId: string): Promise<RTCConfiguration> {
+  try {
+    const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8081";
+    const { getStoredTokens } = await import("@/src/utils/storage");
+    const token = getStoredTokens()?.accessToken ?? "";
+    const res = await fetch(
+      `${baseUrl}/calls/ice-config?userId=${encodeURIComponent(userId)}`,
+      {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        // Không cache — credential có TTL, cần fresh mỗi lần gọi
+        cache: "no-store",
+      },
+    );
+    if (!res.ok) throw new Error(`ice-config HTTP ${res.status}`);
+    const body = (await res.json()) as { iceServers: RTCIceServer[] };
+    if (!Array.isArray(body?.iceServers) || body.iceServers.length === 0) {
+      throw new Error("ice-config response invalid");
+    }
+    return { iceServers: body.iceServers, iceCandidatePoolSize: 10 };
+  } catch (err) {
+    console.warn("[ICE] fetch ice-config failed, fallback to STUN-only:", err);
+    return FALLBACK_ICE_CONFIG;
+  }
+}
 
 const getKey = (id: string | null | undefined) => (id ?? "").trim();
 const toCandidate = (map: Record<string, unknown>): RTCIceCandidateInit => ({
@@ -563,7 +576,9 @@ class CallService {
   private async createPeerConnection(peerId: string, isVideo: boolean) {
     const key = getKey(peerId) || "default";
     if (this.peerConnections.has(key)) return this.peerConnections.get(key)!;
-    const pc = new RTCPeerConnection(ICE_SERVERS);
+    // Lấy ICE config với TURN credentials TTL-based từ backend
+    const iceConfig = await fetchIceConfig(this.userId);
+    const pc = new RTCPeerConnection(iceConfig);
     this.peerConnections.set(key, pc);
     this.peerHasRemoteDescription.set(key, false);
     this.pendingRemoteCandidates.set(key, []);
